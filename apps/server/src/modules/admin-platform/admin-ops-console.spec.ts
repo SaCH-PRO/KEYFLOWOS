@@ -217,6 +217,27 @@ describe('OPS-CONSOLE-READONLY (server half, D-237 / D-291)', () => {
         return new Response(
           JSON.stringify([
             {
+              id: 21,
+              created_at: '2026-11-28T03:41:00Z',
+              html_url: 'https://github.com/KEYFLOWOS/KEYFLOWOS/issues/273#issuecomment-21',
+              user: { login: 'SaCH-PRO' },
+              body: 'Comment 21',
+            },
+            {
+              id: 22,
+              created_at: '2026-11-28T03:42:00Z',
+              html_url: 'https://github.com/KEYFLOWOS/KEYFLOWOS/issues/273#issuecomment-22',
+              user: { login: 'SaCH-PRO' },
+              body: 'Comment 22',
+            },
+            {
+              id: 23,
+              created_at: '2026-11-28T03:43:00Z',
+              html_url: 'https://github.com/KEYFLOWOS/KEYFLOWOS/issues/273#issuecomment-23',
+              user: { login: 'SaCH-PRO' },
+              body: 'Comment 23',
+            },
+            {
               id: 24,
               created_at: '2026-11-28T03:50:00Z',
               html_url: 'https://github.com/KEYFLOWOS/KEYFLOWOS/issues/273#issuecomment-24',

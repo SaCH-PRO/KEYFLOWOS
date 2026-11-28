@@ -1,4 +1,4 @@
-import { Controller, Get, Inject, UseGuards } from '@nestjs/common';
+import { Controller, Get, Header, Inject, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { AdminGuard } from '../../core/auth/admin.guard';
 import { AdminOpsConsoleService, type OpsConsoleSnapshot } from './admin-ops-console.service';
@@ -18,6 +18,7 @@ export class AdminOpsConsoleController {
   ) {}
 
   @Get('console')
+  @Header('Cache-Control', 'no-store')
   async getConsole(): Promise<OpsConsoleSnapshot> {
     return this.opsConsole.getSnapshot();
   }

@@ -1,5 +1,6 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
+import { readFile, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 
 export const OPS_CONSOLE_OPTIONS = Symbol('OPS_CONSOLE_OPTIONS');
@@ -19,14 +20,15 @@ export interface V1ProgressData {
   mainSha: string | null;
   totalPackets: number;
   donePackets: number;
-  inProgressPackets: number;
-  todoPackets: number;
-  pctByPoints: number;
+  inProgressPackets: number | null;
+  todoPackets: number | null;
+  pctByPoints: number | null;
   launchDone: number | null;
   launchTotal: number | null;
-  readyCount: number;
-  readyLaunchCount: number;
-  stalledCount: number;
+  readyCount: number | null;
+  readyLaunchCount: number | null;
+  stalledCount: number | null;
+  uncertainCount: number | null;
 }
 
 export interface LatestMainData {
@@ -89,13 +91,21 @@ export interface AdminOpsConsoleOptions {
   fetchImpl?: typeof fetch;
   now?: () => Date;
   staleAfterMs?: number;
+  cacheTtlMs?: number;
 }
 
 const DEFAULT_STALE_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_CACHE_TTL_MS = 20_000;
 const GITHUB_TIMEOUT_MS = 5_000;
+const MAX_LOCAL_FILE_BYTES = 2 * 1024 * 1024;
+const CHECK_RUNS_CONCURRENCY = 5;
+const CONTROL_ROOM_LIMIT = 10;
 const DEFAULT_CONTROL_ROOM_ISSUE = 273;
 const DEFAULT_GITHUB_REPO = 'KEYFLOWOS/KEYFLOWOS';
-const SAFE_GITHUB_SLUG_RE = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+
+const SAFE_GITHUB_OWNER_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
+const SAFE_GITHUB_REPO_RE = /^(?!\.{1,2}$)[A-Za-z0-9._-]{1,100}$/;
+
 const FAILING_CONCLUSIONS = new Set([
   'failure',
   'timed_out',
@@ -103,11 +113,37 @@ const FAILING_CONCLUSIONS = new Set([
   'action_required',
   'startup_failure',
 ]);
+const BENIGN_NON_PASS_CONCLUSIONS = new Set(['skipped', 'neutral']);
+
+function isSafeGithubSlug(raw: string): boolean {
+  const parts = raw.split('/');
+  if (parts.length !== 2) return false;
+  return SAFE_GITHUB_OWNER_RE.test(parts[0]) && SAFE_GITHUB_REPO_RE.test(parts[1]);
+}
+
+function safeGithubHtmlUrl(raw: unknown): string {
+  if (typeof raw !== 'string' || !raw.trim()) return '';
+  try {
+    const parsed = new URL(raw.trim());
+    if (parsed.protocol !== 'https:' || parsed.hostname !== 'github.com') return '';
+    return parsed.toString();
+  } catch {
+    return '';
+  }
+}
+
+function finiteNumberOrNull(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
 
 function discoverRepoRoot(startDir: string): string {
   let cur = resolve(startDir);
   for (let i = 0; i < 6; i += 1) {
-    if (existsSync(join(cur, 'docs', 'reconstruction', 'handoff', 'V1-STATUS.json'))) {
+    if (
+      existsSync(join(cur, 'docs', 'reconstruction', 'handoff', 'V1-STATUS.json')) ||
+      existsSync(join(cur, 'docs', 'reconstruction', 'handoff', 'ORCHESTRATOR-STATE.md')) ||
+      existsSync(join(cur, 'pnpm-workspace.yaml'))
+    ) {
       return cur;
     }
     const parent = dirname(cur);
@@ -123,6 +159,19 @@ function parseTimestampMs(raw: string | null | undefined): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
+function newestTimestamp(dates: Array<string | null | undefined>, fallback: string): string {
+  let best: string | null = null;
+  let bestMs = -Infinity;
+  for (const d of dates) {
+    const ms = parseTimestampMs(d);
+    if (ms !== null && ms > bestMs) {
+      bestMs = ms;
+      best = d!;
+    }
+  }
+  return best ?? fallback;
+}
+
 function statusFromTimestamp(
   sourceTimestamp: string | null,
   nowMs: number,
@@ -131,6 +180,15 @@ function statusFromTimestamp(
   const tsMs = parseTimestampMs(sourceTimestamp);
   if (tsMs === null) return 'stale';
   return nowMs - tsMs > staleAfterMs ? 'stale' : 'ok';
+}
+
+function firstNonEmptyLine(body: unknown, maxLen: number): string {
+  const lines = String(body ?? '').split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed) return trimmed.slice(0, maxLen);
+  }
+  return '';
 }
 
 function parseOrchestratorLastWritten(markdown: string): string | null {
@@ -147,20 +205,74 @@ function extractBlockers(markdown: string): string[] {
   for (const rawLine of lines) {
     const headingMatch = rawLine.match(/^#{2,4}\s+(.*)$/);
     if (headingMatch) {
-      inSection = /open owner questions|blockers/i.test(headingMatch[1]);
+      inSection = /open\s+(?:owner\s+)?questions|blockers/i.test(headingMatch[1]);
       continue;
     }
     if (!inSection) continue;
     const trimmed = rawLine.trim();
     if (!trimmed) continue;
-    if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+    const numberedMatch = trimmed.match(/^\d+\.\s+(.+)$/);
+    if (numberedMatch) {
+      items.push(numberedMatch[1].trim().slice(0, 240));
+    } else if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
       items.push(trimmed.slice(2).trim().slice(0, 240));
-    } else if (trimmed.startsWith('|') && !/^\|[\s|:-]+\|$/.test(trimmed) && !/^\|\s*(#|id|question|item)\s*\|/i.test(trimmed)) {
+    } else if (
+      trimmed.startsWith('|') &&
+      !/^\|[\s|:-]+\|$/.test(trimmed) &&
+      !/^\|\s*(#|id|question|item)\s*\|/i.test(trimmed)
+    ) {
       items.push(trimmed.slice(0, 240));
     }
     if (items.length >= 30) break;
   }
   return items;
+}
+
+function computeCiState(
+  runs: Array<{ status?: string; conclusion?: string | null }>,
+  totalCount?: number,
+): OpenPrItem['ciState'] {
+  if (runs.length === 0) return 'unknown';
+  if (runs.some((r) => typeof r.conclusion === 'string' && FAILING_CONCLUSIONS.has(r.conclusion))) {
+    return 'failing';
+  }
+  if (runs.some((r) => r.status !== 'completed')) {
+    return 'pending';
+  }
+  if (typeof totalCount === 'number' && totalCount > runs.length) {
+    return 'unknown';
+  }
+  let sawSuccess = false;
+  for (const r of runs) {
+    if (r.conclusion === 'success') {
+      sawSuccess = true;
+    } else if (typeof r.conclusion === 'string' && BENIGN_NON_PASS_CONCLUSIONS.has(r.conclusion)) {
+      continue;
+    } else {
+      return 'unknown';
+    }
+  }
+  return sawSuccess ? 'passing' : 'unknown';
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIdx = 0;
+  const workerCount = Math.min(Math.max(1, limit), items.length);
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIdx < items.length) {
+        const idx = nextIdx;
+        nextIdx += 1;
+        results[idx] = await fn(items[idx]);
+      }
+    }),
+  );
+  return results;
 }
 
 function resolveGithubConfig(): {
@@ -169,16 +281,27 @@ function resolveGithubConfig(): {
   issueNumber: number;
   repoError?: string;
 } {
-  const rawIssue = Number(process.env.OPS_CONSOLE_CONTROL_ROOM_ISSUE ?? DEFAULT_CONTROL_ROOM_ISSUE);
+  const rawIssueStr = process.env.OPS_CONSOLE_CONTROL_ROOM_ISSUE;
+  const parsedIssue = rawIssueStr !== undefined && /^\d+$/.test(rawIssueStr.trim())
+    ? Number(rawIssueStr.trim())
+    : DEFAULT_CONTROL_ROOM_ISSUE;
   const issueNumber =
-    Number.isInteger(rawIssue) && rawIssue > 0 ? rawIssue : DEFAULT_CONTROL_ROOM_ISSUE;
+    Number.isSafeInteger(parsedIssue) && parsedIssue > 0 ? parsedIssue : DEFAULT_CONTROL_ROOM_ISSUE;
   const token =
     (process.env.OPS_CONSOLE_GITHUB_TOKEN || process.env.GITHUB_TOKEN || '').trim() || null;
   const rawRepo = (process.env.OPS_CONSOLE_GITHUB_REPO || DEFAULT_GITHUB_REPO).trim();
-  if (!SAFE_GITHUB_SLUG_RE.test(rawRepo)) {
+  if (!isSafeGithubSlug(rawRepo)) {
     return { token, repo: null, issueNumber, repoError: 'Invalid GitHub repository configuration' };
   }
   return { token, repo: rawRepo, issueNumber };
+}
+
+interface GithubCommentPayload {
+  id: number;
+  created_at: string;
+  html_url: string;
+  user?: { login?: string };
+  body?: string;
 }
 
 @Injectable()
@@ -187,6 +310,9 @@ export class AdminOpsConsoleService {
   private readonly fetchImpl: typeof fetch;
   private readonly now: () => Date;
   private readonly staleAfterMs: number;
+  private readonly cacheTtlMs: number;
+  private cached: { key: string; expiresAtMs: number; snapshot: OpsConsoleSnapshot } | null = null;
+  private inFlight: { key: string; promise: Promise<OpsConsoleSnapshot> } | null = null;
 
   constructor(
     @Optional() @Inject(OPS_CONSOLE_OPTIONS) options?: AdminOpsConsoleOptions,
@@ -195,19 +321,55 @@ export class AdminOpsConsoleService {
     this.fetchImpl = options?.fetchImpl ?? fetch;
     this.now = options?.now ?? (() => new Date());
     this.staleAfterMs = options?.staleAfterMs ?? DEFAULT_STALE_MS;
+    this.cacheTtlMs = options?.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
   }
 
   async getSnapshot(): Promise<OpsConsoleSnapshot> {
     const nowDate = this.now();
-    const fetchedAt = nowDate.toISOString();
     const nowMs = nowDate.getTime();
     const gh = resolveGithubConfig();
+    const cacheKey = `${gh.repo ?? 'invalid'}|${gh.issueNumber}|${gh.token ? '1' : '0'}`;
 
-    const v1Progress = this.readV1Progress(fetchedAt, nowMs);
-    const blockers = this.readBlockers(fetchedAt, nowMs);
+    if (
+      this.cacheTtlMs > 0 &&
+      this.cached &&
+      this.cached.key === cacheKey &&
+      nowMs < this.cached.expiresAtMs
+    ) {
+      return this.cached.snapshot;
+    }
+    if (this.inFlight && this.inFlight.key === cacheKey) {
+      return this.inFlight.promise;
+    }
 
-    const [latestMain, openPrs, controlRoom] = await Promise.all([
-      this.fetchLatestMain(gh, fetchedAt, nowMs),
+    const promise = this.buildSnapshot(gh, nowDate, nowMs).then((snapshot) => {
+      if (this.cacheTtlMs > 0) {
+        this.cached = { key: cacheKey, expiresAtMs: nowMs + this.cacheTtlMs, snapshot };
+      }
+      return snapshot;
+    });
+
+    this.inFlight = { key: cacheKey, promise };
+    try {
+      return await promise;
+    } finally {
+      if (this.inFlight?.promise === promise) {
+        this.inFlight = null;
+      }
+    }
+  }
+
+  private async buildSnapshot(
+    gh: ReturnType<typeof resolveGithubConfig>,
+    nowDate: Date,
+    nowMs: number,
+  ): Promise<OpsConsoleSnapshot> {
+    const fetchedAt = nowDate.toISOString();
+
+    const [v1Progress, blockers, latestMain, openPrs, controlRoom] = await Promise.all([
+      this.readV1Progress(fetchedAt, nowMs),
+      this.readBlockers(fetchedAt, nowMs),
+      this.fetchLatestMain(gh, fetchedAt),
       this.fetchOpenPrs(gh, fetchedAt),
       this.fetchControlRoom(gh, fetchedAt),
     ]);
@@ -227,21 +389,40 @@ export class AdminOpsConsoleService {
     };
   }
 
-  private readV1Progress(fetchedAt: string, nowMs: number): OpsSection<V1ProgressData> {
+  private async readBoundedTextFile(fullPath: string): Promise<{ ok: true; text: string } | { ok: false; reason: string }> {
+    try {
+      const info = await stat(fullPath);
+      if (!info.isFile()) {
+        return { ok: false, reason: 'Target is not a regular file' };
+      }
+      if (info.size > MAX_LOCAL_FILE_BYTES) {
+        return { ok: false, reason: 'Source file exceeds size limit' };
+      }
+      const text = await readFile(fullPath, 'utf8');
+      return { ok: true, text };
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code === 'ENOENT') return { ok: false, reason: 'Source file not found' };
+      return { ok: false, reason: 'Source file could not be read' };
+    }
+  }
+
+  private async readV1Progress(fetchedAt: string, nowMs: number): Promise<OpsSection<V1ProgressData>> {
     const source = 'docs/reconstruction/handoff/V1-STATUS.json';
     const fullPath = join(this.repoRoot, source);
-    if (!existsSync(fullPath)) {
+    const fileRes = await this.readBoundedTextFile(fullPath);
+    if (!fileRes.ok) {
       return {
         status: 'unavailable',
         source,
         fetchedAt,
         sourceTimestamp: null,
         data: null,
-        reason: 'Status file not found',
+        reason: fileRes.reason,
       };
     }
     try {
-      const parsed = JSON.parse(readFileSync(fullPath, 'utf8')) as Record<string, unknown>;
+      const parsed = JSON.parse(fileRes.text) as Record<string, unknown>;
       const generated = (parsed._generated ?? {}) as Record<string, unknown>;
       const summary = (parsed.summary ?? {}) as Record<string, unknown>;
       const byStatus = (summary.by_status ?? {}) as Record<string, Record<string, unknown>>;
@@ -251,9 +432,9 @@ export class AdminOpsConsoleService {
         typeof generated.main_commit_date === 'string' && parseTimestampMs(generated.main_commit_date) !== null
           ? generated.main_commit_date
           : null;
-      const totalPackets = Number(summary.packets);
-      const donePackets = Number(byStatus.done?.packets);
-      if (!Number.isFinite(totalPackets) || !Number.isFinite(donePackets)) {
+      const totalPackets = finiteNumberOrNull(summary.packets);
+      const donePackets = finiteNumberOrNull(byStatus.done?.packets);
+      if (totalPackets === null || donePackets === null) {
         return {
           status: 'unavailable',
           source,
@@ -273,20 +454,15 @@ export class AdminOpsConsoleService {
           mainSha: typeof generated.main_sha === 'string' ? generated.main_sha : null,
           totalPackets,
           donePackets,
-          inProgressPackets: Number(byStatus['in-progress']?.packets ?? 0) || 0,
-          todoPackets: Number(byStatus.todo?.packets ?? 0) || 0,
-          pctByPoints: Number(byStatus.done?.pct_by_points ?? 0) || 0,
-          launchDone:
-            byTrack.launch && Number.isFinite(Number(byTrack.launch.done))
-              ? Number(byTrack.launch.done)
-              : null,
-          launchTotal:
-            byTrack.launch && Number.isFinite(Number(byTrack.launch.total))
-              ? Number(byTrack.launch.total)
-              : null,
-          readyCount: Number(summary.todo_with_dependencies_met ?? 0) || 0,
-          readyLaunchCount: Number(summary.todo_with_dependencies_met_launch ?? 0) || 0,
-          stalledCount: Number(summary.stalled_ready ?? 0) || 0,
+          inProgressPackets: finiteNumberOrNull(byStatus['in-progress']?.packets),
+          todoPackets: finiteNumberOrNull(byStatus.todo?.packets),
+          pctByPoints: finiteNumberOrNull(byStatus.done?.pct_by_points),
+          launchDone: finiteNumberOrNull(byTrack.launch?.done),
+          launchTotal: finiteNumberOrNull(byTrack.launch?.total),
+          readyCount: finiteNumberOrNull(summary.todo_with_dependencies_met),
+          readyLaunchCount: finiteNumberOrNull(summary.todo_with_dependencies_met_launch),
+          stalledCount: finiteNumberOrNull(summary.stalled_ready),
+          uncertainCount: Array.isArray(summary.uncertain) ? summary.uncertain.length : null,
         },
       };
     } catch {
@@ -301,40 +477,29 @@ export class AdminOpsConsoleService {
     }
   }
 
-  private readBlockers(fetchedAt: string, nowMs: number): OpsSection<BlockersData> {
+  private async readBlockers(fetchedAt: string, nowMs: number): Promise<OpsSection<BlockersData>> {
     const source = 'docs/reconstruction/handoff/ORCHESTRATOR-STATE.md';
     const fullPath = join(this.repoRoot, source);
-    if (!existsSync(fullPath)) {
+    const fileRes = await this.readBoundedTextFile(fullPath);
+    if (!fileRes.ok) {
       return {
         status: 'unavailable',
         source,
         fetchedAt,
         sourceTimestamp: null,
         data: null,
-        reason: 'Orchestrator state file not found',
+        reason: fileRes.reason,
       };
     }
-    try {
-      const md = readFileSync(fullPath, 'utf8');
-      const sourceTimestamp = parseOrchestratorLastWritten(md);
-      const items = extractBlockers(md);
-      return {
-        status: statusFromTimestamp(sourceTimestamp, nowMs, this.staleAfterMs),
-        source,
-        fetchedAt,
-        sourceTimestamp,
-        data: { items },
-      };
-    } catch {
-      return {
-        status: 'unavailable',
-        source,
-        fetchedAt,
-        sourceTimestamp: null,
-        data: null,
-        reason: 'Orchestrator state file could not be read',
-      };
-    }
+    const sourceTimestamp = parseOrchestratorLastWritten(fileRes.text);
+    const items = extractBlockers(fileRes.text);
+    return {
+      status: statusFromTimestamp(sourceTimestamp, nowMs, this.staleAfterMs),
+      source,
+      fetchedAt,
+      sourceTimestamp,
+      data: { items },
+    };
   }
 
   private async githubGetJson<T>(
@@ -346,6 +511,7 @@ export class AdminOpsConsoleService {
     try {
       const res = await this.fetchImpl(url, {
         method: 'GET',
+        redirect: 'error',
         headers: {
           Accept: 'application/vnd.github+json',
           'X-GitHub-Api-Version': '2022-11-28',
@@ -368,7 +534,6 @@ export class AdminOpsConsoleService {
   private async fetchLatestMain(
     gh: ReturnType<typeof resolveGithubConfig>,
     fetchedAt: string,
-    nowMs: number,
   ): Promise<OpsSection<LatestMainData>> {
     const source = gh.repo ? `github:${gh.repo}:commits/main` : 'github:unconfigured';
     if (!gh.token) {
@@ -426,13 +591,13 @@ export class AdminOpsConsoleService {
       };
     }
 
-    const subject = String(res.data.commit?.message ?? '').split('\n')[0].trim().slice(0, 200);
+    const subject = firstNonEmptyLine(res.data.commit?.message, 200);
     const author = String(
       res.data.commit?.committer?.name ?? res.data.commit?.author?.name ?? 'unknown',
     ).slice(0, 120);
 
     return {
-      status: statusFromTimestamp(committedAt, nowMs, this.staleAfterMs),
+      status: 'ok',
       source,
       fetchedAt,
       sourceTimestamp: committedAt,
@@ -442,7 +607,7 @@ export class AdminOpsConsoleService {
         subject,
         author,
         committedAt,
-        htmlUrl: typeof res.data.html_url === 'string' ? res.data.html_url : '',
+        htmlUrl: safeGithubHtmlUrl(res.data.html_url),
       },
     };
   }
@@ -495,8 +660,10 @@ export class AdminOpsConsoleService {
       };
     }
 
-    const items: OpenPrItem[] = await Promise.all(
-      pullsRes.data.slice(0, 20).map(async (pr) => {
+    const items: OpenPrItem[] = await mapWithConcurrency(
+      pullsRes.data.slice(0, 20),
+      CHECK_RUNS_CONCURRENCY,
+      async (pr) => {
         const headSha = String(pr.head?.sha ?? '');
         let ciState: OpenPrItem['ciState'] = 'unknown';
         if (/^[0-9a-f]{7,40}$/i.test(headSha)) {
@@ -505,16 +672,7 @@ export class AdminOpsConsoleService {
             check_runs?: Array<{ status?: string; conclusion?: string | null }>;
           }>(gh.repo!, gh.token!, `/commits/${headSha}/check-runs?per_page=100`);
           if (checksRes.ok && Array.isArray(checksRes.data?.check_runs)) {
-            const runs = checksRes.data.check_runs;
-            if (runs.length > 0) {
-              if (runs.some((r) => r.conclusion && FAILING_CONCLUSIONS.has(r.conclusion))) {
-                ciState = 'failing';
-              } else if (runs.some((r) => r.status !== 'completed')) {
-                ciState = 'pending';
-              } else {
-                ciState = 'passing';
-              }
-            }
+            ciState = computeCiState(checksRes.data.check_runs, checksRes.data.total_count);
           }
         }
         return {
@@ -524,24 +682,20 @@ export class AdminOpsConsoleService {
           headRef: String(pr.head?.ref ?? '').slice(0, 120),
           headSha,
           updatedAt: String(pr.updated_at ?? ''),
-          htmlUrl: String(pr.html_url ?? ''),
+          htmlUrl: safeGithubHtmlUrl(pr.html_url),
           ciState,
         };
-      }),
+      },
     );
-
-    const newestUpdated =
-      items
-        .map((i) => i.updatedAt)
-        .filter((d) => parseTimestampMs(d) !== null)
-        .sort()
-        .at(-1) ?? fetchedAt;
 
     return {
       status: 'ok',
       source,
       fetchedAt,
-      sourceTimestamp: newestUpdated,
+      sourceTimestamp: newestTimestamp(
+        items.map((i) => i.updatedAt),
+        fetchedAt,
+      ),
       data: { items },
     };
   }
@@ -574,47 +728,82 @@ export class AdminOpsConsoleService {
       };
     }
 
-    const res = await this.githubGetJson<
-      Array<{
-        id: number;
-        created_at: string;
-        html_url: string;
-        user?: { login?: string };
-        body?: string;
-      }>
-    >(gh.repo, gh.token, `/issues/${gh.issueNumber}/comments?sort=created&direction=desc&per_page=10`);
-
-    if (!res.ok || !Array.isArray(res.data)) {
+    // GitHub's /issues/{n}/comments endpoint ignores sort/direction and always returns ascending
+    // pages starting from the oldest comment. Read the issue's total comment count first and
+    // fetch the tail page(s) to retrieve the newest comments accurately.
+    const issueRes = await this.githubGetJson<{ comments?: number }>(
+      gh.repo,
+      gh.token,
+      `/issues/${gh.issueNumber}`,
+    );
+    if (!issueRes.ok || typeof issueRes.data?.comments !== 'number' || !Number.isFinite(issueRes.data.comments)) {
       return {
         status: 'unavailable',
         source,
         fetchedAt,
         sourceTimestamp: null,
         data: null,
-        reason: res.ok ? 'Malformed GitHub comments response' : res.reason,
+        reason: issueRes.ok ? 'Malformed GitHub issue response' : issueRes.reason,
       };
     }
 
-    const items: ControlRoomComment[] = res.data.slice(0, 10).map((c) => ({
+    const totalComments = Math.max(0, Math.floor(issueRes.data.comments));
+    if (totalComments === 0) {
+      return {
+        status: 'ok',
+        source,
+        fetchedAt,
+        sourceTimestamp: fetchedAt,
+        data: { issueNumber: gh.issueNumber, items: [] },
+      };
+    }
+
+    const lastPage = Math.ceil(totalComments / CONTROL_ROOM_LIMIT);
+    const tailRes = await this.githubGetJson<GithubCommentPayload[]>(
+      gh.repo,
+      gh.token,
+      `/issues/${gh.issueNumber}/comments?per_page=${CONTROL_ROOM_LIMIT}&page=${lastPage}`,
+    );
+    if (!tailRes.ok || !Array.isArray(tailRes.data)) {
+      return {
+        status: 'unavailable',
+        source,
+        fetchedAt,
+        sourceTimestamp: null,
+        data: null,
+        reason: tailRes.ok ? 'Malformed GitHub comments response' : tailRes.reason,
+      };
+    }
+
+    let combined: GithubCommentPayload[] = tailRes.data;
+    if (combined.length < CONTROL_ROOM_LIMIT && lastPage > 1) {
+      const prevRes = await this.githubGetJson<GithubCommentPayload[]>(
+        gh.repo,
+        gh.token,
+        `/issues/${gh.issueNumber}/comments?per_page=${CONTROL_ROOM_LIMIT}&page=${lastPage - 1}`,
+      );
+      if (prevRes.ok && Array.isArray(prevRes.data)) {
+        combined = [...prevRes.data, ...combined];
+      }
+    }
+
+    const newest = combined.slice(-CONTROL_ROOM_LIMIT).reverse();
+    const items: ControlRoomComment[] = newest.map((c) => ({
       id: c.id,
       author: String(c.user?.login ?? 'unknown').slice(0, 80),
       createdAt: String(c.created_at ?? ''),
-      excerpt: String(c.body ?? '').split('\n')[0].trim().slice(0, 240),
-      htmlUrl: String(c.html_url ?? ''),
+      excerpt: firstNonEmptyLine(c.body, 240),
+      htmlUrl: safeGithubHtmlUrl(c.html_url),
     }));
-
-    const newestCreated =
-      items
-        .map((i) => i.createdAt)
-        .filter((d) => parseTimestampMs(d) !== null)
-        .sort()
-        .at(-1) ?? fetchedAt;
 
     return {
       status: 'ok',
       source,
       fetchedAt,
-      sourceTimestamp: newestCreated,
+      sourceTimestamp: newestTimestamp(
+        items.map((i) => i.createdAt),
+        fetchedAt,
+      ),
       data: { issueNumber: gh.issueNumber, items },
     };
   }
