@@ -130,7 +130,9 @@ const OLDER_FIXTURE_DIRECTIVE = 'CG-CURSOR-PROOF-001';
  */
 function isCiEnv(env = process.env) {
   const ci = String(env.CI ?? '').trim().toLowerCase();
-  return ci === 'true' || ci === '1' || String(env.KF_REQUIRE_POWERSHELL ?? '').trim() === '1';
+  if (ci !== '' && ci !== 'false' && ci !== '0' && ci !== 'no' && ci !== 'off') return true;
+  if (String(env.GITHUB_ACTIONS ?? '').trim().toLowerCase() === 'true') return true;
+  return String(env.KF_REQUIRE_POWERSHELL ?? '').trim() === '1';
 }
 
 function cursorChannelStatus({
@@ -190,9 +192,10 @@ test('the cursor makes directive processing idempotent', { skip: CURSOR_CHANNEL.
   assert.ok(CURSOR_CHANNEL.ready, CURSOR_CHANNEL.reason);
 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-worker-'));
-  const stateDir = path.join(root, '.agent-control', '.worker');
-  fs.mkdirSync(stateDir, { recursive: true });
   try {
+    const stateDir = path.join(root, '.agent-control', '.worker');
+    fs.mkdirSync(stateDir, { recursive: true });
+
     // First tick against the recorded #80 fixture must find the newest directive.
     const first = runWorkerWithFixture(root);
     assert.equal(first.status, 0, first.stderr || first.stdout);
@@ -297,28 +300,39 @@ test('the recorded #80 cursor fixture exists and drives idempotent directive sel
     assert.equal(second.status, 0, second.stderr || second.stdout);
     const secondOut = JSON.parse(second.stdout);
     assert.equal(secondOut.selected, null, 'recording the newest directive in cursor.json must suppress re-selection');
+    assert.equal(
+      secondOut.reason,
+      `newest_already_processed:${EXPECTED_FIXTURE_DIRECTIVE}`,
+      'suppression must be attributed specifically to the processed cursor entry',
+    );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
 test('cursorChannelStatus fails closed in CI and on missing fixtures, skipping only locally without PowerShell', () => {
-  const ciNoPs = cursorChannelStatus({ ps: null, env: { CI: 'true' } });
-  assert.equal(ciNoPs.ready, false);
-  assert.equal(ciNoPs.skip, false, 'CI=true without PowerShell must not skip');
-  assert.match(ciNoPs.reason, /fail closed/i);
+  for (const [label, env] of [
+    ['CI=true', { CI: 'true' }],
+    ['CI=1', { CI: '1' }],
+    ['CI=yes', { CI: 'yes' }],
+    ['GITHUB_ACTIONS=true', { GITHUB_ACTIONS: 'true' }],
+    ['KF_REQUIRE_POWERSHELL=1', { KF_REQUIRE_POWERSHELL: '1' }],
+  ]) {
+    const status = cursorChannelStatus({ ps: null, env });
+    assert.equal(status.ready, false, `${label}: not ready without PowerShell`);
+    assert.equal(status.skip, false, `${label}: must not skip without PowerShell`);
+    assert.match(status.reason, /fail closed/i, `${label}: reason must explain fail-closed`);
+  }
 
-  const ciNumericNoPs = cursorChannelStatus({ ps: null, env: { CI: '1' } });
-  assert.equal(ciNumericNoPs.ready, false);
-  assert.equal(ciNumericNoPs.skip, false, 'CI=1 without PowerShell must not skip');
-
-  const reqPsNoPs = cursorChannelStatus({ ps: null, env: { KF_REQUIRE_POWERSHELL: '1' } });
-  assert.equal(reqPsNoPs.ready, false);
-  assert.equal(reqPsNoPs.skip, false, 'KF_REQUIRE_POWERSHELL=1 without PowerShell must not skip');
-
-  const localNoPs = cursorChannelStatus({ ps: null, env: {} });
-  assert.equal(localNoPs.ready, false);
-  assert.equal(localNoPs.skip, 'no PowerShell available', 'local dev without PowerShell skips cleanly');
+  for (const [label, env] of [
+    ['empty env', {}],
+    ['CI=false', { CI: 'false' }],
+    ['CI=0', { CI: '0' }],
+  ]) {
+    const localNoPs = cursorChannelStatus({ ps: null, env });
+    assert.equal(localNoPs.ready, false, `${label}: not ready without PowerShell`);
+    assert.equal(localNoPs.skip, 'no PowerShell available', `${label}: local dev without PowerShell skips cleanly`);
+  }
 
   const missingFixtureLocal = cursorChannelStatus({
     ps: 'pwsh',
@@ -343,7 +357,16 @@ test('cursorChannelStatus fails closed in CI and on missing fixtures, skipping o
 test('in CI (CI=true) without PowerShell, the cursor proof fails closed instead of skipping', () => {
   const env = {};
   for (const [k, v] of Object.entries(process.env)) {
-    if (k.toUpperCase() === 'PATH' || k === 'KF_REQUIRE_POWERSHELL' || k === 'NODE_TEST_CONTEXT') continue;
+    const upper = k.toUpperCase();
+    if (
+      upper === 'PATH' ||
+      upper === 'CI' ||
+      upper === 'GITHUB_ACTIONS' ||
+      upper === 'KF_REQUIRE_POWERSHELL' ||
+      upper === 'NODE_TEST_CONTEXT'
+    ) {
+      continue;
+    }
     env[k] = v;
   }
   env.CI = 'true';
@@ -351,11 +374,17 @@ test('in CI (CI=true) without PowerShell, the cursor proof fails closed instead 
 
   const run = spawnSync(
     process.execPath,
-    ['--test', '--test-name-pattern=^the cursor makes directive processing idempotent$', path.resolve('scripts/agent-control/tests/worker.spec.mjs')],
+    [
+      '--test',
+      '--test-reporter=tap',
+      '--test-name-pattern=^the cursor makes directive processing idempotent$',
+      path.resolve('scripts/agent-control/tests/worker.spec.mjs'),
+    ],
     { encoding: 'utf8', env, timeout: 60000 },
   );
   const out = `${run.stdout}\n${run.stderr}`;
-  assert.notEqual(run.status, 0, `CI=true with no PowerShell must fail closed instead of skipping; got exit 0:\n${out}`);
+  assert.equal(run.error, undefined, `subprocess spawn must not error or time out: ${run.error?.message}`);
+  assert.equal(run.status, 1, `CI=true with no PowerShell must fail closed (exit 1) instead of skipping; got ${run.status}:\n${out}`);
   assert.ok(!/skipped\s+[1-9]/.test(out), `cursor proof must not be skipped in CI=true:\n${out}`);
   assert.match(out, /CI requires PowerShell/i, `failure output must name the fail-closed CI guard:\n${out}`);
 });
