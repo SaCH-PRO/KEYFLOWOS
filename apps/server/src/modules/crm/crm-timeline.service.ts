@@ -1314,6 +1314,7 @@ export class CrmTimelineService {
         const data = isPlainRecord(event.data) ? event.data : null;
         const noteDescription =
           event.type === 'note.created' &&
+          typeof data?.kind !== 'string' &&
           typeof data?.description === 'string' &&
           data.description.length > 0
             ? data.description

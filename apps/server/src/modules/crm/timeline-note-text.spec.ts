@@ -388,20 +388,41 @@ describe('P239 FU-TIMELINE-NOTE-TEXT — contact Timeline note.created text hydr
     });
   });
 
-  it('hydrates getContactTimeline and buildTimeline (including notes outside prefetch limit and deleted fallbacks)', async () => {
+  it('hydrates getContactTimeline and buildTimeline (including DB fallback beyond prefetch cap, multi-contact isolation, options.contacts forwarding, and deleted fallbacks)', async () => {
     const notes = [
-      { id: 'tl_1', businessId: BIZ_A, contactId: CONTACT_1, body: 'Recent note text', createdAt: new Date('2026-11-27T12:00:00Z') },
-      { id: 'tl_2', businessId: BIZ_A, contactId: CONTACT_1, body: 'Second note outside limit:1', createdAt: new Date('2026-11-27T11:00:00Z') },
+      ...Array.from({ length: 11 }, (_, idx) => ({
+        id: `tl_${idx + 1}`,
+        businessId: BIZ_A,
+        contactId: CONTACT_1,
+        body: idx === 10 ? 'Older note #11 outside prefetch cap' : `Recent note ${idx + 1}`,
+        createdAt: new Date(Date.UTC(2026, 10, 27, 12, 0, 11 - idx)),
+      })),
+      {
+        id: 'tl_other_contact_note',
+        businessId: BIZ_A,
+        contactId: 'con_OTHER',
+        body: 'OTHER CONTACT SECRET',
+        createdAt: new Date('2026-11-27T11:00:00Z'),
+      },
     ];
     const events = [
       {
-        id: 'tle_1',
+        id: 'tle_fallback',
         businessId: BIZ_A,
         contactId: CONTACT_1,
         type: 'note.created',
-        data: { noteId: 'tl_2' },
+        data: { noteId: 'tl_11' },
         source: 'crm',
         createdAt: new Date('2026-11-27T12:05:00Z'),
+      },
+      {
+        id: 'tle_cross_contact',
+        businessId: BIZ_A,
+        contactId: CONTACT_1,
+        type: 'note.created',
+        data: { noteId: 'tl_other_contact_note' },
+        source: 'crm',
+        createdAt: new Date('2026-11-27T12:04:30Z'),
       },
       {
         id: 'tle_deleted',
@@ -414,19 +435,35 @@ describe('P239 FU-TIMELINE-NOTE-TEXT — contact Timeline note.created text hydr
       },
     ];
 
-    const { client } = makeViewerMockClient({ events, notes });
+    const { client, contactNoteFindMany } = makeViewerMockClient({ events, notes });
     const service = new CrmTimelineService(
       { client } as unknown as PrismaService,
       { emit: vi.fn() } as unknown as EventEmitter2,
     );
 
     const timeline = await service.getContactTimeline(BIZ_A, CONTACT_1, 10);
-    expect(timeline.find((e) => e.id === 'tle_1')?.description).toBe('Second note outside limit:1');
+    expect(timeline.find((e) => e.id === 'tle_fallback')?.description).toBe('Older note #11 outside prefetch cap');
+    expect(timeline.find((e) => e.id === 'tle_cross_contact')?.description).toBe('Event recorded via crm');
     expect(timeline.find((e) => e.id === 'tle_deleted')?.description).toBe('Event recorded via crm');
+    expect(contactNoteFindMany).toHaveBeenCalledWith({
+      where: { businessId: BIZ_A, contactId: CONTACT_1, id: { in: ['tl_11', 'tl_other_contact_note', 'tl_missing'] } },
+      select: { id: true, body: true },
+    });
 
-    const highlights = await service.buildTimeline(BIZ_A, 10);
-    expect(highlights.find((e) => e.id === 'tle_1')?.description).toBe('Second note outside limit:1');
+    contactNoteFindMany.mockClear();
+    const visibilityFilter = { visibility: 'BUSINESS' as const };
+    const highlights = await service.buildTimeline(BIZ_A, 10, { contacts: visibilityFilter });
+    expect(highlights.find((e) => e.id === 'tle_fallback')?.description).toBe('Older note #11 outside prefetch cap');
+    expect(highlights.find((e) => e.id === 'tle_cross_contact')?.description).toBe('Event recorded via crm');
     expect(highlights.find((e) => e.id === 'tle_deleted')?.description).toBe('Event recorded via crm');
+    expect(contactNoteFindMany).toHaveBeenCalledWith({
+      where: {
+        businessId: BIZ_A,
+        contact: visibilityFilter,
+        id: { in: ['tl_11', 'tl_other_contact_note', 'tl_missing'] },
+      },
+      select: { id: true, contactId: true, body: true },
+    });
   });
 
   it('fails closed on prefetchedNotes missing or mismatched businessId/contactId, handles duplicate noteIds, whitespace/multiline bodies, and emoji surrogate-pair boundaries', async () => {
