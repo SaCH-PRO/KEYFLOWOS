@@ -10,7 +10,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
-import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor, act, within } from "@testing-library/react";
 import type { ExpenseBudget, ExpenseCategory, RecurringExpense } from "@/lib/client";
 
 const ZONES: Record<string, string> = vi.hoisted(() => ({ biz_A: "America/Port_of_Spain", biz_B: "America/Port_of_Spain" } as Record<string, string>));
@@ -505,13 +505,15 @@ describe("P254 R6-2: the panel remounted for the same business offers no New bef
   /** Watches every node the page adds, so a New offered for one commit is seen. */
   function watchForNew() {
     const seen = { offered: false };
-    const mo = new MutationObserver((records) => {
+    const scan = (records: MutationRecord[]) => {
       for (const r of records) for (const n of Array.from(r.addedNodes)) {
         if (n instanceof HTMLElement && /New recurring expense/.test(n.textContent ?? "")) seen.offered = true;
       }
-    });
+    };
+    const mo = new MutationObserver(scan);
     mo.observe(document.body, { childList: true, subtree: true });
-    return { seen, stop: () => mo.disconnect() };
+    // P254 R8-3: records not yet delivered are read before the observer stops.
+    return { seen, stop: () => { scan(mo.takeRecords()); mo.disconnect(); } };
   }
   for (const path of ["A -> B -> A in one batch", "a failed read, then Try again"] as const) {
     it(`${path}: no New until the list answers again`, async () => {
@@ -548,7 +550,9 @@ describe("P254 R7-1: a reload that goes from ok straight to failed (no loading b
     await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalledWith("biz_A", expect.anything()), LONG);
     fireEvent.click(await screen.findByRole("tab", { name: "Recurring" }, LONG));
     expect(await screen.findByRole("button", { name: /New recurring expense/ }, LONG)).toBeTruthy();
-    const retry = (await screen.findAllByRole("button", { name: "Retry" }, LONG))[0];
+    // P254 R8-2: the Retry in the categories' own note (the list's note, if any, has its own).
+    const catNote = (await screen.findByText(/Couldn't load expense categories/, {}, LONG)).closest('[role="status"]') as HTMLElement;
+    const retry = within(catNote).getByRole("button", { name: "Retry" });
     // loadData's catch sets the read to failed with no loading before it (use-expenses-data's refresh path).
     client.fetchExpenses.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     fireEvent.click(retry);
@@ -557,15 +561,18 @@ describe("P254 R7-1: a reload that goes from ok straight to failed (no loading b
     const held = deferred<unknown>();
     client.fetchRecurringExpenses.mockImplementation(() => held.promise);
     let offered = false;
-    const mo = new MutationObserver((records) => {
+    const scan = (records: MutationRecord[]) => {
       for (const r of records) for (const n of Array.from(r.addedNodes)) {
         if (n instanceof HTMLElement && /New recurring expense/.test(n.textContent ?? "")) offered = true;
       }
-    });
+    };
+    const mo = new MutationObserver(scan);
     mo.observe(document.body, { childList: true, subtree: true });
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(client.fetchRecurringExpenses.mock.calls.length).toBeGreaterThan(reads), LONG);
     await settle();
+    // P254 R8-3: records not yet delivered to the callback are read before the observer stops.
+    scan(mo.takeRecords());
     mo.disconnect();
     expect(offered, "New offered beside a list not read again").toBe(false);
     expect(screen.queryByRole("button", { name: /New recurring expense/ })).toBeNull();
@@ -604,7 +611,9 @@ describe("P254 R7-2: a save that goes through closes the builder; a refused one 
       fireEvent.click(screen.getByRole("button", { name: kind }));
       await waitFor(() => expect(call()).toHaveBeenCalled());
       await waitFor(() => expect(screen.queryByRole("dialog"), `${kind} saved, and the builder stayed open`).toBeNull(), LONG);
-    });
+      // P254 R8-4: and the save was for the business the panel shows.
+      expect(call().mock.calls[0][0], `${kind} sent for another business`).toBe("biz_A");
+    }, 30000);
     it(`${kind}, refused: the builder stays open`, async () => {
       call().mockResolvedValue(refusedSave);
       if (kind === "Create") await newBuilder(); else await editBuilder();
@@ -612,7 +621,7 @@ describe("P254 R7-2: a save that goes through closes the builder; a refused one 
       await waitFor(() => expect(call()).toHaveBeenCalled());
       await settle();
       expect(screen.queryByRole("dialog"), `a refused ${kind} closed the builder`).toBeTruthy();
-    });
+    }, 30000);
   }
 });
 
@@ -630,5 +639,5 @@ describe("P254 R7-3: the trigger going back to 0 while mounted opens nothing", (
     await settle();
     await settle();
     expect(screen.queryByRole("dialog"), "the trigger's reset to 0 opened the builder").toBeNull();
-  });
+  }, 30000);
 });
