@@ -33,7 +33,7 @@ import { KeyCortexCompensationService } from './key-cortex-compensation.service'
 import { KeyCortexLearningService } from './key-cortex-learning.service';
 import { KeyCortexAuditService } from './key-cortex-audit.service';
 import { KeyCortexEventBusService } from './key-cortex-event-bus.service';
-import { isToolAllowedInV1, v1ToolRefusalReason, v1ToolRefusalReasonForInvocation } from '../ai/v1-tool-allowlist';
+import { isToolAllowedInV1, v1ToolRefusalReasonForInvocation } from '../ai/v1-tool-allowlist';
 import { GatewayToolDefinition } from './key-cortex.types';
 
 export interface KeyCortexToolContext {

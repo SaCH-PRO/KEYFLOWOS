@@ -216,13 +216,40 @@ export function isToolAllowedInV1(toolName: string): boolean {
   return v1ToolRefusalReason(toolName) === null;
 }
 
-const V1_WRAPPER_PAYLOAD_KEYS = ['payload', 'toolParams', 'inputPayload', 'parameters', 'result'] as const;
+const V1_WRAPPER_TOOLS: ReadonlySet<string> = new Set([
+  'cortex.execute_tool',
+  'execute_tool',
+  'cortex_execute_tool',
+]);
+
+function isWrapperToolName(name: string | null | undefined): boolean {
+  if (typeof name !== 'string') return false;
+  return V1_WRAPPER_TOOLS.has(name.trim().toLowerCase());
+}
+
+const V1_STANDARD_PAYLOAD_KEYS = ['payload', 'toolParams', 'inputPayload', 'parameters', 'result'] as const;
+const V1_WRAPPER_ALIAS_CONTAINER_KEYS = ['params', 'args', 'input', 'toolCalls', 'steps', 'actions'] as const;
+const V1_WRAPPER_ALIAS_TOOL_KEYS = ['tool', 'tool_name'] as const;
+
+function ownProp(obj: Record<string, unknown>, key: string): unknown {
+  return Object.prototype.hasOwnProperty.call(obj, key) ? obj[key] : undefined;
+}
 
 /**
  * Checks `toolOrActionName` and any nested tool/action name carried inside a
- * wrapper or proposal payload (`toolName`, `actionType`, and nested
- * `payload` / `toolParams` / `inputPayload` / `parameters` / `result` objects)
- * using bounded BFS so cyclic or deeply nested payloads fail safely.
+ * wrapper or proposal payload (`toolName`, `actionType`, and nested container
+ * objects/arrays) using bounded BFS.
+ *
+ * Security (KEY-TOOL-ALLOWLIST R3 SEC MAJOR-2):
+ * - Guards all property reads with `hasOwnProperty` so prototype-inherited
+ *   keys cannot spoof or false-positive.
+ * - For wrapper invocations (`cortex.execute_tool`, `EXECUTE_TOOL`,
+ *   `cortex_execute_tool`), also traverses alias containers (`params`, `args`,
+ *   `input`, `toolCalls`, `steps`, `actions`), array elements, and alias tool
+ *   fields (`tool`, `tool_name`).
+ * - If a wrapper invocation truncates due to `maxDepth` or `maxNodes`, fails
+ *   CLOSED by returning `V1_TOOL_UNAVAILABLE_MESSAGE`. Benign deep payloads on
+ *   non-wrapper tools remain unaffected.
  */
 export function v1ToolRefusalReasonForInvocation(
   toolOrActionName: string | null | undefined,
@@ -234,39 +261,116 @@ export function v1ToolRefusalReasonForInvocation(
     const direct = v1ToolRefusalReason(toolOrActionName);
     if (direct) return direct;
   }
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  let sawWrapper = isWrapperToolName(toolOrActionName);
+  if (Array.isArray(payload) && !sawWrapper) {
     return null;
   }
 
   const seen = new Set<object>();
-  const queue: Array<{ obj: Record<string, unknown>; depth: number }> = [
-    { obj: payload as Record<string, unknown>, depth: 0 },
+  const queue: Array<{ value: object; depth: number; inWrapper: boolean }> = [
+    { value: payload as object, depth: 0, inWrapper: sawWrapper },
   ];
   let visited = 0;
+  let truncated = false;
+
+  const enqueueChild = (child: unknown, nextDepth: number, childInWrapper: boolean) => {
+    if (!child || typeof child !== 'object') return;
+    if (seen.has(child)) return;
+    if (Array.isArray(child) && !childInWrapper) return;
+    if (nextDepth > maxDepth) {
+      truncated = true;
+      return;
+    }
+    queue.push({ value: child, depth: nextDepth, inWrapper: childInWrapper });
+  };
 
   while (queue.length > 0 && visited < maxNodes) {
     const current = queue.shift()!;
-    if (seen.has(current.obj)) continue;
-    seen.add(current.obj);
+    if (seen.has(current.value)) continue;
+    seen.add(current.value);
     visited += 1;
 
-    if (typeof current.obj.toolName === 'string') {
-      const refusal = v1ToolRefusalReason(current.obj.toolName);
-      if (refusal) return refusal;
-    }
-    if (typeof current.obj.actionType === 'string') {
-      const refusal = v1ToolRefusalReason(current.obj.actionType);
-      if (refusal) return refusal;
+    if (Array.isArray(current.value)) {
+      if (!current.inWrapper) continue;
+      for (const item of current.value) {
+        enqueueChild(item, current.depth + 1, true);
+      }
+      continue;
     }
 
-    if (current.depth >= maxDepth) continue;
-    for (const key of V1_WRAPPER_PAYLOAD_KEYS) {
-      const nested = current.obj[key];
-      if (nested && typeof nested === 'object' && !Array.isArray(nested) && !seen.has(nested)) {
-        queue.push({ obj: nested as Record<string, unknown>, depth: current.depth + 1 });
+    const obj = current.value as Record<string, unknown>;
+    let nodeInWrapper = current.inWrapper;
+
+    const toolNameVal = ownProp(obj, 'toolName');
+    if (typeof toolNameVal === 'string') {
+      const refusal = v1ToolRefusalReason(toolNameVal);
+      if (refusal) return refusal;
+      if (isWrapperToolName(toolNameVal)) {
+        sawWrapper = true;
+        nodeInWrapper = true;
+      }
+    }
+    const actionTypeVal = ownProp(obj, 'actionType');
+    if (typeof actionTypeVal === 'string') {
+      const refusal = v1ToolRefusalReason(actionTypeVal);
+      if (refusal) return refusal;
+      if (isWrapperToolName(actionTypeVal)) {
+        sawWrapper = true;
+        nodeInWrapper = true;
+      }
+    }
+
+    if (nodeInWrapper) {
+      for (const aliasKey of V1_WRAPPER_ALIAS_TOOL_KEYS) {
+        const aliasVal = ownProp(obj, aliasKey);
+        if (typeof aliasVal === 'string') {
+          const refusal = v1ToolRefusalReason(aliasVal);
+          if (refusal) return refusal;
+          if (isWrapperToolName(aliasVal)) {
+            sawWrapper = true;
+          }
+        }
+      }
+    }
+
+    for (const key of V1_STANDARD_PAYLOAD_KEYS) {
+      enqueueChild(ownProp(obj, key), current.depth + 1, nodeInWrapper);
+    }
+
+    if (nodeInWrapper) {
+      for (const key of V1_WRAPPER_ALIAS_CONTAINER_KEYS) {
+        enqueueChild(ownProp(obj, key), current.depth + 1, true);
+      }
+      // Also detect shallow/wide decoy siblings inside wrapper containers so
+      // an attacker cannot exhaust `maxNodes` on arbitrary keys before our
+      // real target key is popped from the queue.
+      for (const key of Object.keys(obj)) {
+        if (
+          (V1_STANDARD_PAYLOAD_KEYS as readonly string[]).includes(key) ||
+          (V1_WRAPPER_ALIAS_CONTAINER_KEYS as readonly string[]).includes(key)
+        ) {
+          continue;
+        }
+        const val = obj[key];
+        if (val && typeof val === 'object') {
+          enqueueChild(val, current.depth + 1, true);
+        }
       }
     }
   }
+
+  if (queue.length > 0) {
+    truncated = true;
+  }
+
+  if (truncated && sawWrapper) {
+    return V1_TOOL_UNAVAILABLE_MESSAGE;
+  }
+
   return null;
 }
 
