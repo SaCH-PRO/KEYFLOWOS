@@ -11,7 +11,6 @@ import {
   ArrowRight,
   AlertTriangle,
   Package,
-  ShieldCheck,
   Tag,
   Loader2,
   ShoppingBag,
@@ -21,6 +20,7 @@ import { formatPrice } from "@/lib/format";
 import type { CartItem, PromoCode } from "./types";
 import { typeBadge, calculateDiscount } from "./utils";
 import Image from "next/image";
+import { useServedOverHttps } from "./trust-bar";
 
 type Props = {
   cart: CartItem[];
@@ -63,6 +63,7 @@ export function CartDrawer({
   onApplyPromo,
   onRemovePromo,
 }: Props) {
+  const servedOverHttps = useServedOverHttps();
   const [fabPulse, setFabPulse] = useState(false);
   const [removingItem, setRemovingItem] = useState<string | null>(null);
   const [promoInput, setPromoInput] = useState("");
@@ -357,17 +358,15 @@ export function CartDrawer({
                     Continue Shopping
                   </button>
 
-                  <div className="flex items-center justify-center gap-4 text-[10px] text-muted-foreground/40">
-                    <span className="flex items-center gap-1">
-                      <ShieldCheck className="w-3 h-3" />
-                      Secure checkout
-                    </span>
-                    <span className="w-px h-3 bg-border/50" />
-                    <span className="flex items-center gap-1">
-                      <Lock className="w-3 h-3" />
-                      SSL Encrypted
-                    </span>
-                  </div>
+                  {/* P231 r1 (D-303): no 'Secure checkout'; 'SSL Encrypted' only when the page is served over https. */}
+                  {servedOverHttps && (
+                    <div className="flex items-center justify-center gap-4 text-[10px] text-muted-foreground/40">
+                      <span className="flex items-center gap-1">
+                        <Lock className="w-3 h-3" />
+                        SSL Encrypted
+                      </span>
+                    </div>
+                  )}
                 </div>
               </>
             )}

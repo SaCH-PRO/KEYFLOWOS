@@ -29,6 +29,7 @@ import { MerchandisingMode } from "./components/merchandising-mode";
 import { CatalogMode } from "./components/catalog-mode";
 import { OperationsMode } from "./components/operations-mode";
 import { LaunchMode } from "./components/launch-mode";
+import { liveProducts, bookableServices } from "./storefront-counts";
 
 type HeroSection = { imageUrl?: string; coverImageUrl?: string; headline?: string; subheadline?: string; ctaText?: string };
 type SocialProofSection = { testimonials?: unknown[] };
@@ -78,6 +79,18 @@ export default function StorePage() {
   const productCount = s.commerceProducts.length;
   const serviceCount = s.services.length;
   const deliveryCount = s.activeDeliveryMethodsCount ?? 0;
+  // P231 r7 (D-303): what the storefront shows, for the hub's copy tools (its analysis tools read the whole catalog),
+  // and a key of it, so the context follows a product added, removed, switched off or hidden.
+  // r10-r11: without the store graph (not read yet, failed, or refused: liveProductIds is then empty) what is live is
+  // not known; without the storefront config (not read: it is emptyStorefront) what it hides is not known. Not known
+  // is null, so the hub says nothing about what is on the store, and the copy (the hub's and the panels') states no
+  // total, only what is known.
+  const graphRead = s.storeGraph != null;
+  const configRead = s.storefrontConfigRead !== false;
+  const storeView = { productsKnown: graphRead && configRead, servicesKnown: configRead };
+  const storeServices = storeView.servicesKnown ? bookableServices(s.services, s.storefrontConfig) : null;
+  const storeProducts = storeView.productsKnown ? liveProducts(s.commerceProducts, s.liveProductIds, { services: s.services, stock: s.stockByProduct, storefrontConfig: s.storefrontConfig }) : null;
+  const storeKey = `${storeProducts ? storeProducts.map((p) => p.id).join(",") : "?"}|${storeServices ? storeServices.map((sv) => sv.id).join(",") : "?"}`;
 
   useEffect(() => {
     if (!s.businessId) return;
@@ -89,8 +102,12 @@ export default function StorePage() {
       businessId: s.businessId,
       activeView: activeTab,
       itemCount: productCount,
+      // P231 r7: the whole catalog for the analysis tools (pricing, images, empty catalog), and what the storefront
+      // shows for the copy tools (D-303).
       products: s.commerceProducts,
       services: s.services,
+      storeProducts,
+      storeServices,
       testimonials: (s.storefrontConfig.socialProof as SocialProofSection | undefined)?.testimonials ?? [],
       storeEnabled: s.storeEnabled,
       hasHeroImage: !!(_hero?.imageUrl || _hero?.coverImageUrl),
@@ -112,7 +129,7 @@ export default function StorePage() {
       graphStats: s.storeGraph ? { liveCount: s.storeGraph.liveCount, draftCount: s.storeGraph.draftCount, driftCount: s.storeGraph.driftCount, totalProducts: s.storeGraph.totalProducts } : undefined,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally narrowed deps to context-shaping fields; `ai.updateStoreContext`, `s.commerceProducts`, and `s.services` are summarized via `productCount`/`serviceCount` and an unstable `ai` bag identity would re-fire this on every render of the AI hub.
-  }, [s.businessId, activeTab, productCount, serviceCount, s.storeEnabled, s.businessData, s.storefrontConfig, s.businessHours, deliveryCount, s.readiness, s.storeGraph]);
+  }, [s.businessId, activeTab, productCount, serviceCount, storeKey, s.storeEnabled, s.businessData, s.storefrontConfig, s.businessHours, deliveryCount, s.readiness, s.storeGraph]);
 
   const emitEvent = s.emitEvent;
   const handleTabChange = useCallback((key: string) => {
@@ -302,6 +319,9 @@ export default function StorePage() {
                 businessData={s.businessData}
                 services={s.services}
                 commerceProducts={s.commerceProducts}
+                liveProductIds={s.liveProductIds}
+                stockByProduct={s.stockByProduct}
+                storeView={storeView}
                 storefrontConfig={cfg}
                 onConfigChange={s.handleConfigChange}
                 onSaveConfig={s.handleSaveConfig}
@@ -315,6 +335,8 @@ export default function StorePage() {
                 services={s.services}
                 commerceProducts={s.commerceProducts}
                 liveProductIds={s.liveProductIds}
+                stockByProduct={s.stockByProduct}
+                storeView={storeView}
                 storefrontConfig={cfg}
                 onConfigChange={s.handleConfigChange}
                 onSaveConfig={s.handleSaveConfig}
@@ -347,6 +369,7 @@ export default function StorePage() {
                 itemOverrides={s.storefrontConfig.catalog?.itemOverrides}
                 onItemOverrideChange={s.handleItemOverrideChange}
                 categoryEmphasis={s.storefrontConfig.catalog?.categoryEmphasis}
+                faqEntries={s.storefrontConfig.faqEntries}
                 onCategoryEmphasisChange={s.handleCategoryEmphasisChange}
               />
             )}

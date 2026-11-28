@@ -121,7 +121,7 @@ export function SocialProofPanel({ storefrontConfig, configSaving, onConfigChang
             type="text"
             value={storefrontConfig.socialProof?.guaranteeText ?? ""}
             onChange={(e) => onConfigChange("socialProof", { guaranteeText: e.target.value })}
-            placeholder="e.g. 100% satisfaction guaranteed"
+            placeholder="e.g. your returns or refund policy, in your words"
             className="kf-input w-full text-sm"
           />
         </div>
