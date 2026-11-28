@@ -107,7 +107,6 @@ function deferred<T>() {
 }
 const A1 = (over: Partial<Expense> = {}) => expense({ id: "exp_A1", status: "PAID", categoryId: "cat_1", date: "2026-10-15T00:00:00.000Z", vendor: "October Vendor", ...over });
 const A2 = () => expense({ id: "exp_A2", status: "PAID", categoryId: "cat_1", date: "2026-11-15T00:00:00.000Z", vendor: "November Vendor" });
-const OCT_BUDGET = { id: "bud_oct", categoryId: "cat_1", amount: 777, spent: 100, remaining: 677, percentUsed: 13, isOverBudget: false, isNearAlert: false, month: 10, year: 2026 };
 let a1Status: Expense["status"] = "PAID";
 afterEach(() => { routeParams.id = "exp_A1"; a1Status = "PAID"; });
 beforeEach(() => {
@@ -137,25 +136,6 @@ const noToasts = () => {
   expect(toast.error, "A1's failure said on A2").not.toHaveBeenCalled();
 };
 
-type Act = { name: string; call: () => ReturnType<typeof vi.fn>; start: () => Promise<void>; answer: () => unknown; said: string; bill?: boolean };
-const ACTIONS: Act[] = [
-  { name: "Void", call: () => finance.voidBill, start: () => confirmIn(/Void expense/, voidOk), answer: () => ok(A1({ status: "VOID" })), said: "Expense voided" },
-  { name: "Delete", call: () => client.deleteExpense, start: () => confirmIn(/Delete expense/, deleteOk), answer: () => ok(null), said: "Expense deleted" },
-  { name: "Pay", call: () => finance.payBill, bill: true,
-    start: async () => {
-      fireEvent.click(screen.getByRole("button", { name: /Approve/ }));
-      const pay = await screen.findByRole("button", { name: /^Pay$/ });
-      await waitFor(() => expect((pay as HTMLButtonElement).disabled).toBe(false));
-      fireEvent.click(pay);
-    },
-    answer: () => ok(A1({ status: "PAID" })), said: "Bill paid" },
-  { name: "Edit save", call: () => client.updateExpense,
-    start: async () => {
-      fireEvent.click(screen.getByRole("button", { name: /Edit expense/ }));
-      fireEvent.click(await screen.findByRole("button", { name: "Update Expense" }));
-    },
-    answer: () => ok(A1({ description: "Edited on A1" })), said: "Expense saved" },
-];
 
 
 /** The dialog open on the page: Pay's has a Pay button, the edit sheet an Update Expense button. */

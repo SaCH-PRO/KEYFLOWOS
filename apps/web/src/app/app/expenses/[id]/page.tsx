@@ -97,10 +97,12 @@ export default function ExpenseDetailPage() {
   const retryExpense = useCallback(() => setReadAgain((n) => n + 1), []);
   const [loading, setLoading] = useState(true);
   const [businessId, _setBusinessId] = useState<string | null>(() => getStoredBusinessId() ?? null);
-  const [showEdit, setShowEdit] = useState(false);
+  // R29-1: an open edit sheet or Pay dialog is the read it was opened on (null when closed). Each open is its own
+  // instance (keyed by that read) with its own check, so a reply for an earlier open never answers for a later one.
+  const [editFor, setEditFor] = useState<number | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmVoid, setConfirmVoid] = useState(false);
-  const [showPay, setShowPay] = useState(false);
+  const [payFor, setPayFor] = useState<number | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   // R14-4: this page shows one business's expense. A switch (this tab's switcher, or another tab's stored id) leaves
   // for the Expenses list and stops showing it; a reply for it that lands after the switch says nothing.
@@ -114,10 +116,6 @@ export default function ExpenseDetailPage() {
   // R27-2: the main read's generation. A Retry started for one expense whose reply lands once the page shows another
   // (the id changed within this page) sets nothing.
   const readGen = useRef(0);
-  // R28-1: the read each dialog was opened on. Pay's and the edit sheet's replies are judged by this page's check and
-  // by that read still being the one shown, so a reply for A1 that lands once the page shows A2 says and sets nothing.
-  const payGen = useRef(0);
-  const editGen = useRef(0);
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
@@ -171,10 +169,10 @@ export default function ExpenseDetailPage() {
       setBudgets([]);
       setBudRead({ kind: "loading" });
       // R28-2: and with no dialog of the previous expense open: Delete, Void, Pay and Edit act on the expense shown.
-      setShowEdit(false);
+      setEditFor(null);
       setConfirmDelete(false);
       setConfirmVoid(false);
-      setShowPay(false);
+      setPayFor(null);
       setActionLoading(null);
       try {
         const [expRes, catRes] = await Promise.all([
@@ -307,10 +305,13 @@ export default function ExpenseDetailPage() {
     setConfirmVoid(false);
   };
 
-  const handleApprove = () => { payGen.current = readGen.current; setShowPay(true); };
-  const payCheck = useCallback((forBusiness: string) => payGen.current === readGen.current && isCurrentBusiness(forBusiness), [isCurrentBusiness]);
-  const openEdit = () => { editGen.current = readGen.current; setShowEdit(true); };
-  const editCheck = useCallback((forBusiness: string) => editGen.current === readGen.current && isCurrentBusiness(forBusiness), [isCurrentBusiness]);
+  // R28-1 / R29-1: Pay's and the edit sheet's replies are judged by this page's check and by the read their own open
+  // was made on still being the one shown: a reply for A1 says and sets nothing once the page shows A2, even with the
+  // same dialog opened again on A2.
+  const handleApprove = () => setPayFor(readGen.current);
+  const payCheck = useCallback((forBusiness: string) => payFor !== null && payFor === readGen.current && isCurrentBusiness(forBusiness), [payFor, isCurrentBusiness]);
+  const openEdit = () => setEditFor(readGen.current);
+  const editCheck = useCallback((forBusiness: string) => editFor !== null && editFor === readGen.current && isCurrentBusiness(forBusiness), [editFor, isCurrentBusiness]);
   const handleReject = () => runVoid("reject", "Bill rejected and voided");
   const handleVoid = () => runVoid("void", "Expense voided");
 
@@ -555,6 +556,10 @@ export default function ExpenseDetailPage() {
               <p className="text-xs text-muted-foreground mb-3">
                 {categoryLabel} · {budgetMonthLabel}
               </p>
+              {/* R28 / R29-3: defensive. Every path that leaves budRead not ok also clears the budgets (the read start,
+                  a refused or failed read, the catch); a Retry starts only from failed, whose budgets are already
+                  empty. So a matching budget with budRead not ok cannot be built today: this check keeps figures from
+                  ever showing beside an unread budget if a later path forgets to clear them. Not counted as proven. */}
               {budget && budRead.kind === "ok" ? (
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm">
@@ -658,20 +663,23 @@ export default function ExpenseDetailPage() {
       </div>
 
       {/* Edit drawer */}
-      {showEdit && businessId && (
+      {editFor !== null && businessId && (
         <ExpenseFormSideSheet
+          key={editFor}
           businessId={businessId}
           categories={categories}
           categoriesRead={catRead}
           onRetryCategories={() => { void retryCategories(); }}
           editingExpense={expense}
-          onClose={() => setShowEdit(false)}
+          onClose={() => setEditFor(null)}
           onSaved={async () => {
-            setShowEdit(false);
+            // R29-1: the read this open was made on (this closure's own), compared with the one shown after each step.
+            const opened = editFor;
+            setEditFor(null);
             // R23-4: the saved expense is read again for this page only; a failed refresh is said, never thrown.
             try {
               const res = await getExpense(businessId, expenseId);
-              if (!live(businessId) || editGen.current !== readGen.current) return;
+              if (!live(businessId) || opened !== readGen.current) return;
               // R24-1: a refused refresh ({ error }, or no row) is said, as a thrown one is.
               if (res.error || !res.data) {
                 toast.error("Saved, but couldn't refresh this expense. Reload to see it.");
@@ -679,7 +687,7 @@ export default function ExpenseDetailPage() {
               }
               setExpense(res.data);
             } catch {
-              if (live(businessId) && editGen.current === readGen.current) toast.error("Saved, but couldn't refresh this expense. Reload to see it.");
+              if (live(businessId) && opened === readGen.current) toast.error("Saved, but couldn't refresh this expense. Reload to see it.");
             }
           }}
           isCurrentBusiness={editCheck}
@@ -711,14 +719,17 @@ export default function ExpenseDetailPage() {
       />
 
       {/* Pay a bill: asks the account and the method (D-168) */}
-      {showPay && businessId && (
+      {payFor !== null && businessId && (
         <BillPayDialog
+          key={payFor}
           businessId={businessId}
           bill={expense}
-          onClose={() => setShowPay(false)}
+          onClose={() => setPayFor(null)}
           isCurrentBusiness={payCheck}
           onPaid={(paid) => {
-            setShowPay(false);
+            // R29-1: this open's own read (the dialog's check already holds it; compared again before any write).
+            if (payFor !== readGen.current) return;
+            setPayFor(null);
             toast.success("Bill paid");
             if (paid) setExpense({ ...expense, ...paid });
           }}
