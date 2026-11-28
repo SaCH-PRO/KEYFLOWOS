@@ -195,3 +195,46 @@ test('gatherGateFacts reads head...main, so "behind" counts what main has and th
   assert.equal(facts[0].compare.behind_by, 3);
   assert.ok(gh.calls.includes(`api repos/o/r/compare/${SHA1}...${MAIN.sha}`));
 });
+
+test('TOF-STALE-GATES-PKT: a same-repo pkt/* PR with a stale gate is assessed, while a fork pkt/* head is ignored', () => {
+  const PKT_SHA = '5'.repeat(40);
+  const PKT_CUR_SHA = '6'.repeat(40);
+  const FORK_PKT_SHA = '7'.repeat(40);
+  const gh = fakeGh({
+    prs: [
+      pr(201, 'pkt/V1-EXAMPLE-STALE', PKT_SHA),
+      pr(202, 'pkt/V1-EXAMPLE-CURRENT', PKT_CUR_SHA),
+      pr(203, 'pkt/V1-FORK-SPOOF', FORK_PKT_SHA, {
+        head: { ref: 'pkt/V1-FORK-SPOOF', sha: FORK_PKT_SHA, repo: { full_name: 'attacker/r' } },
+      }),
+      pr(204, 'pkt/V1-UPPERCASE-REPO', SHA1, {
+        head: { ref: 'pkt/V1-UPPERCASE-REPO', sha: SHA1, repo: { full_name: 'O/R' } },
+      }),
+    ],
+    compare: {
+      [PKT_SHA]: { ahead_by: 2, files: [{ filename: 'apps/server/src/app.module.ts' }] },
+      [PKT_CUR_SHA]: { ahead_by: 0, files: [] },
+      [SHA1]: { ahead_by: 0, files: [] },
+    },
+    artifacts: {
+      [PKT_SHA]: { 'active-packet.yaml': { source_main: 'c'.repeat(40) }, 'claude-return.yaml': { source_main: 'c'.repeat(40), source_head: PKT_SHA } },
+      [PKT_CUR_SHA]: { 'active-packet.yaml': { source_main: MAIN.sha }, 'claude-return.yaml': { source_main: MAIN.sha, source_head: PKT_CUR_SHA } },
+      [SHA1]: { 'active-packet.yaml': { source_main: MAIN.sha }, 'claude-return.yaml': { source_main: MAIN.sha, source_head: SHA1 } },
+    },
+    runs: {
+      [PKT_SHA]: [{ name: 'Agent Control Gate', conclusion: 'success', status: 'completed', created_at: '2026-10-06T18:01:00Z', head_sha: PKT_SHA }],
+      [PKT_CUR_SHA]: [{ name: 'Agent Control Gate', conclusion: 'success', status: 'completed', created_at: '2026-10-11T17:00:00Z', head_sha: PKT_CUR_SHA }],
+      [SHA1]: [{ name: 'Agent Control Gate', conclusion: 'success', status: 'completed', created_at: '2026-10-11T17:00:00Z', head_sha: SHA1 }],
+    },
+  });
+
+  const report = reportStaleGates('o/r', gh.run);
+  assert.equal(report.open_total, 4);
+  assert.equal(report.impl_total, 3);
+  assert.deepEqual(report.prs.map((p) => p.number), [201, 202, 204]);
+  assert.deepEqual(report.stale, [201]);
+  assert.deepEqual(report.misleading_green, [201]);
+  assert.equal(report.prs.find((p) => p.number === 202).stale, false);
+  assert.ok(!gh.calls.some((c) => c.includes('pulls/203')), 'fork pkt/* PR must never be fetched or assessed');
+});
+
