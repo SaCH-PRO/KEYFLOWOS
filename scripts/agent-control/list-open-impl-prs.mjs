@@ -117,10 +117,18 @@ async function fetchPage(fetchImpl, { token, owner, name, cursor }) {
       throw new ListingError(LISTING_ERRORS.SHAPE, `node ${i} isCrossRepository unreadable: ${JSON.stringify(node.isCrossRepository)}`);
     }
     let headRepositoryNameWithOwner = null;
-    if (node.headRepository !== null && node.headRepository !== undefined) {
-      if (typeof node.headRepository !== 'object' || typeof node.headRepository.nameWithOwner !== 'string' || !node.headRepository.nameWithOwner) {
-        throw new ListingError(LISTING_ERRORS.SHAPE, `node ${i} headRepository.nameWithOwner unreadable`);
+    if (node.headRepository === null) {
+      if (node.isCrossRepository === false) {
+        throw new ListingError(LISTING_ERRORS.SHAPE, `node ${i} headRepository is null for non-cross-repository PR`);
       }
+    } else if (
+      !node.headRepository ||
+      typeof node.headRepository !== 'object' ||
+      typeof node.headRepository.nameWithOwner !== 'string' ||
+      !node.headRepository.nameWithOwner
+    ) {
+      throw new ListingError(LISTING_ERRORS.SHAPE, `node ${i} headRepository.nameWithOwner unreadable`);
+    } else {
       headRepositoryNameWithOwner = node.headRepository.nameWithOwner;
     }
     return {
@@ -136,7 +144,7 @@ async function fetchPage(fetchImpl, { token, owner, name, cursor }) {
 
 /**
  * One whole enumeration of the open pull requests.
- * @returns {{totalCount: number, nodes: {number, headRefName, isDraft}[], pages: number}}
+ * @returns {{totalCount: number, nodes: {number, headRefName, isDraft, isCrossRepository, headRepositoryNameWithOwner}[], pages: number}}
  * @throws {ListingError} on any failure or inconsistency
  */
 export async function enumerateOpenPullRequests({ fetchImpl = globalThis.fetch, token, repository } = {}) {
@@ -180,9 +188,11 @@ export async function enumerateOpenPullRequests({ fetchImpl = globalThis.fetch, 
 }
 
 function isSameRepositoryHead(node, repository) {
+  const repo = String(repository || '').trim().toLowerCase();
+  if (!repo) return false;
   if (node.isCrossRepository !== false) return false;
   if (typeof node.headRepositoryNameWithOwner !== 'string' || !node.headRepositoryNameWithOwner) return false;
-  return node.headRepositoryNameWithOwner.toLowerCase() === String(repository || '').toLowerCase();
+  return node.headRepositoryNameWithOwner.toLowerCase() === repo;
 }
 
 /**
