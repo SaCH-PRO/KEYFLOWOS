@@ -468,7 +468,8 @@ describe("P267 R6-1: an impossible prefill date starts on today, never a rolled-
   const open = (date: string, receiptUrl?: string) =>
     render(<ExpenseFormSideSheet businessId="biz_A" categories={CATS as never} editingExpense={null} prefill={{ date, description: "Toner", amount: 99, receiptUrl }} onClose={vi.fn()} onSaved={vi.fn()} isCurrentBusiness={() => true} />);
   const date = () => screen.getByLabelText(/^Date/) as HTMLInputElement;
-  for (const impossible of ["2026-02-30", "2026-02-31", "2026-04-31", "2026-02-29"]) {
+  // R6 (second review): "12/03/2026" (no ISO date at all) was read by new Date as 3 December: the same fallback.
+  for (const impossible of ["2026-02-30", "2026-02-31", "2026-04-31", "2026-02-29", "12/03/2026", "March 12"]) {
     it(`a prefill of "${impossible}" starts on today in the business's zone (${TODAY_IN_ZONE}), not a rolled-over day`, () => {
       open(impossible);
       expect(date().value, "an impossible date became a different, plausible one").toBe(TODAY_IN_ZONE);
