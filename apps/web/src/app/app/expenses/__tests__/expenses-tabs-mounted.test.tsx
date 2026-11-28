@@ -106,6 +106,9 @@ async function mountPage() {
   await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled(), { timeout: 10000 });
   const release = gate.release;
   setTimeout(release, 0);
+  // P265 R2-3: the view tabs are rendered once the expenses read has answered ok, so the first one is waited for (as
+  // repair27 and repair28 do) before any case looks a tab up.
+  await screen.findByRole("tab", { name: "Expenses" }, { timeout: 10000 });
   return view;
 }
 
