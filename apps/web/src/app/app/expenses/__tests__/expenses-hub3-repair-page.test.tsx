@@ -234,7 +234,9 @@ describe("SEC-EXH3-1: a business switch with the Expenses page open", () => {
     fireEvent.click(await screen.findByRole("button", { name: /^add expense$/i }, { timeout: 10000 }));
     expect(await screen.findByRole("dialog", {}, { timeout: 10000 })).toBeTruthy();
     switchTo("biz_B");
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull(), { timeout: 10000 });
+    // P265 R2-2: the sheet closes in the render that shows B (switchTo flushes inside act), so this is asserted at
+    // once: a long wait here would pass a sheet that closed seconds late.
+    expect(screen.queryByRole("dialog"), "the sheet open for A did not close in the render that shows B").toBeNull();
   }, 30000);
   it("P265: the same, with the expenses read held until after the lookup (as a network reply can be)", async () => {
     // The Add expense button is offered only once the expenses read has answered ok (page.tsx). A read that has been
@@ -247,7 +249,9 @@ describe("SEC-EXH3-1: a business switch with the Expenses page open", () => {
     fireEvent.click(await screen.findByRole("button", { name: /^add expense$/i }, { timeout: 10000 }));
     expect(await screen.findByRole("dialog", {}, { timeout: 10000 })).toBeTruthy();
     switchTo("biz_B");
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull(), { timeout: 10000 });
+    // P265 R2-2: the sheet closes in the render that shows B (switchTo flushes inside act), so this is asserted at
+    // once: a long wait here would pass a sheet that closed seconds late.
+    expect(screen.queryByRole("dialog"), "the sheet open for A did not close in the render that shows B").toBeNull();
   }, 30000);
 });
 
