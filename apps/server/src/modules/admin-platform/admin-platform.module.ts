@@ -4,7 +4,7 @@ import { AdminUserController } from './admin-user.controller';
 import { AdminBusinessController } from './admin-business.controller';
 import { AdminEventController } from './admin-event.controller';
 import { AdminOpsConsoleController } from './admin-ops-console.controller';
-import { AdminOpsConsoleService } from './admin-ops-console.service';
+import { AdminOpsConsoleService, OPS_CONSOLE_OPTIONS } from './admin-ops-console.service';
 import { GdprPurgeService } from './gdpr-purge.service';
 
 @Module({
@@ -15,7 +15,11 @@ import { GdprPurgeService } from './gdpr-purge.service';
     AdminEventController,
     AdminOpsConsoleController,
   ],
-  providers: [GdprPurgeService, AdminOpsConsoleService],
+  providers: [
+    GdprPurgeService,
+    AdminOpsConsoleService,
+    { provide: OPS_CONSOLE_OPTIONS, useValue: {} },
+  ],
   exports: [GdprPurgeService],
 })
 export class AdminPlatformModule {}
