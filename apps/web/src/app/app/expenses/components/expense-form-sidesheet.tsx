@@ -299,7 +299,8 @@ export function ExpenseFormSideSheet({
       description: prefill?.description ?? "",
       amount: typeof prefill?.amount === "number" ? String(prefill.amount) : "",
       date:
-        typeof dateValue === "string" && /^\d{4}-\d{2}-\d{2}$/.test(dateValue)
+        // P267 R5-2: only a real day is taken as it comes ("2026-02-30" matches the pattern and is no day).
+        typeof dateValue === "string" && isCalendarDate(dateValue)
           ? dateValue
           : prefillDay(String(dateValue)),
       vendor: prefill?.vendor ?? "",
@@ -357,9 +358,10 @@ export function ExpenseFormSideSheet({
 
   const submit = async () => {
     // P267 R2-1: Date is marked required, so it is required here too (an empty date was saved as today by the server).
-    // R4-1: this is the guard. Save is aria-disabled (not disabled) while a required field is empty, so it stays
-    // focusable and its "Still needed" description is heard; activating it (a click, or Enter or Space, which a
-    // native button turns into a click) comes here and sends nothing.
+    // R4-1 / R5-1: Save is aria-disabled (not disabled) while a required field is empty, so it stays focusable and
+    // its "Still needed" description is heard. Activating it (a click, or Enter or Space, which a native button turns
+    // into a click) is refused by handleSubmit before it takes the flight; this guard is defence in depth for any
+    // other caller of submit(), unreachable through Save.
     if (missingRequired.length > 0) return;
     // R16-3: checked before anything is sent. Another tab's switch can reach the stored id before its storage event
     // reaches this tab (so before the page's own check knows): nothing is saved for the business no longer chosen.
@@ -501,6 +503,9 @@ export function ExpenseFormSideSheet({
   const submittingRef = useRef(false);
   const [submitting, setSubmitting] = useState(false);
   const handleSubmit = async () => {
+    // P267 R5-1: a press on a blocked Save is refused before it takes the flight, so nothing goes busy for a render
+    // (Close and Cancel would be disabled, P257). submit() keeps its own guard for any other caller.
+    if (missingRequired.length > 0) return;
     if (submittingRef.current) return;
     submittingRef.current = true;
     setSubmitting(true);

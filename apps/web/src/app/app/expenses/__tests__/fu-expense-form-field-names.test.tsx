@@ -412,6 +412,8 @@ describe("P267 R4-1: a blocked Save stays focusable, says why, and sends nothing
 describe("P267 R5-1: a press on the blocked Save takes no flight", () => {
   it("Close and Cancel are never disabled, aria-busy is never set, and focus stays on Save", async () => {
     sheet();
+    // the sheet focuses its panel in a frame after it opens; let that happen before Save is focused
+    await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
     fireEvent.change(named("textbox", "Description"), { target: { value: "Printer toner" } });
     fireEvent.change(named("spinbutton", "Amount (TTD)"), { target: { value: "100" } });
     fireEvent.change(screen.getByLabelText(/^Date/), { target: { value: "" } });
