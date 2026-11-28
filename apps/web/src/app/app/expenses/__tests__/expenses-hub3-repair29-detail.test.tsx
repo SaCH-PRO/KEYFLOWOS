@@ -124,13 +124,6 @@ async function toA2(view: ReturnType<typeof render>) {
   view.rerender(<ExpenseDetailPage />);
   await screen.findByRole("heading", { name: "November Vendor" });
 }
-async function confirmIn(button: RegExp, pick: (b: HTMLButtonElement) => boolean) {
-  fireEvent.click(screen.getByRole("button", { name: button }));
-  const dialog = await screen.findByRole("dialog");
-  fireEvent.click(Array.from(dialog.querySelectorAll("button")).find((b) => pick(b as HTMLButtonElement))!);
-}
-const voidOk = (b: HTMLButtonElement) => /Void expense/.test(b.textContent ?? "");
-const deleteOk = (b: HTMLButtonElement) => (b.textContent ?? "").trim() === "Delete";
 const noToasts = () => {
   expect(toast.success, "A1's reply said on A2").not.toHaveBeenCalled();
   expect(toast.error, "A1's failure said on A2").not.toHaveBeenCalled();
