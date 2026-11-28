@@ -4,7 +4,8 @@ import { OPERATOR_INVOICE_CONTACT_SELECT } from './commerce.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
-import { PlanLimitGuard, RequirePlanLimit } from '../subscriptions/plan-limit.guard';
+import { planLimitDenialException } from '../subscriptions/plan-limit.guard';
+import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import { TeamAuditInterceptor, AuditAction } from '../../core/interceptors/team-audit.interceptor';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -63,7 +64,22 @@ export class RecurringInvoiceController {
   constructor(
     @Inject(RecurringInvoiceService) private readonly service: RecurringInvoiceService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(SubscriptionsService) private readonly subscriptions: SubscriptionsService,
   ) {}
+
+  /**
+   * V1-66 (PLAN-TABLE review SEC-PT-1 & R1-COR-04): enforce the
+   * recurring_invoices plan gate AFTER D-46 authorization so an unauthorized
+   * non-member SUPER_ADMIN receives the D-46 refusal before any subscription
+   * lookup or trial-expiry write, and so downgraded tenants cannot reactivate
+   * schedules via resume or PATCH status='ACTIVE'.
+   */
+  private async assertRecurringInvoicesAllowed(businessId: string): Promise<void> {
+    const check = await this.subscriptions.checkLimit(businessId, 'recurring_invoices');
+    if (!check.allowed) {
+      throw planLimitDenialException('recurring_invoices', check);
+    }
+  }
 
   /**
    * W3-D46-CREATE-AND-RECURRING (owner ruling D-46): a platform SUPER_ADMIN
@@ -127,9 +143,8 @@ export class RecurringInvoiceController {
   // forwarded, so the service binds only a contact that member may open (a
   // hidden one is the 404 of an unknown id), and the body carries the
   // projected contact.
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, PlanLimitGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
-  @RequirePlanLimit('recurring_invoices')
   @UseInterceptors(TeamAuditInterceptor)
   @AuditAction('revenue', 'recurring_invoice_created', 'recurring_invoice')
   @Post('businesses/:businessId/recurring-invoices')
@@ -150,6 +165,7 @@ export class RecurringInvoiceController {
     @Req() req?: ActorRequest,
   ) {
     await this.assertSuperAdminMayWriteRevenue(req, businessId);
+    await this.assertRecurringInvoicesAllowed(businessId);
     // The actor is set after the body spread: the inline body type is not
     // validated or whitelisted, so a body field can never name it.
     return toScheduleResponse(await this.service.createRecurringInvoice({ ...body, businessId, actorUserId: req?.user?.id }));
@@ -179,6 +195,9 @@ export class RecurringInvoiceController {
     @Req() req?: ActorRequest,
   ) {
     await this.assertSuperAdminMayWriteRevenue(req, businessId);
+    if (body?.status === 'ACTIVE') {
+      await this.assertRecurringInvoicesAllowed(businessId);
+    }
     return toScheduleResponse(await this.service.updateRecurringInvoice({ ...body, id, businessId }));
   }
 
@@ -208,6 +227,7 @@ export class RecurringInvoiceController {
   @Post('businesses/:businessId/recurring-invoices/:id/resume')
   async resume(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req?: ActorRequest) {
     await this.assertSuperAdminMayWriteRevenue(req, businessId);
+    await this.assertRecurringInvoicesAllowed(businessId);
     return toScheduleResponse(await this.service.resumeRecurringInvoice(businessId, id));
   }
 
