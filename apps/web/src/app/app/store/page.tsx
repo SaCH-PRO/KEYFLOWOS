@@ -358,6 +358,7 @@ export default function StorePage() {
                 storefrontConfig={cfg}
                 onConfigChange={s.handleConfigChange}
                 onSaveConfig={s.handleSaveConfig}
+                onConfigChangeAndSave={s.handleConfigChangeAndSave}
                 configSaving={s.configSaving}
                 onHoursChange={s.setBusinessHours}
                 onSaveHours={s.handleSaveHours}

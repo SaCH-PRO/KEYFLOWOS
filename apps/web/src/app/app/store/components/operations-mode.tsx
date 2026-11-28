@@ -50,6 +50,8 @@ type Props = {
 
   onConfigChange: (section: string, updates: Record<string, unknown>) => void;
   onSaveConfig: () => Promise<void>;
+  /** P237: apply a change and save the config with it in (a save in the same tick would send the config before it). */
+  onConfigChangeAndSave: (section: string, updates: Record<string, unknown>) => Promise<void>;
   configSaving: boolean;
   onHoursChange: (hours: BusinessHoursMap) => void;
   onSaveHours: () => Promise<void>;
@@ -495,6 +497,7 @@ export function OperationsMode({
   storefrontConfig,
   onConfigChange,
   onSaveConfig,
+  onConfigChangeAndSave,
   configSaving,
   onHoursChange,
   onSaveHours,
@@ -516,13 +519,13 @@ export function OperationsMode({
   const hasContact = !!(contactOptions.whatsappNumber || contactOptions.email || contactOptions.phone);
 
   function handleStatusChange(newStatus: StoreStatus) {
-    onConfigChange("storeSettings", { storeStatus: newStatus });
     if (newStatus === "active" && !storeEnabled) {
       onToggleStoreEnabled();
     } else if (newStatus !== "active" && storeEnabled) {
       onToggleStoreEnabled();
     }
-    void onSaveConfig();
+    // P237: the saved config carries the status just chosen (not this render's config, from before it).
+    void onConfigChangeAndSave("storeSettings", { storeStatus: newStatus });
   }
 
   const liveStatusLabel = STATUS_OPTIONS.find((s) => s.key === storeStatus)?.label ?? "Active";

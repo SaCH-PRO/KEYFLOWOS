@@ -47,6 +47,16 @@ function emptyStorefront(): StorefrontConfig {
  */
 type Landed = { businessId: string; business: boolean; storefront: boolean; graph: boolean; graphRefused: boolean };
 
+const ARRAY_CONFIG_KEYS = new Set(["sections", "faqEntries"]);
+
+/** A storefront config with one change applied: "__root" merges at the top, array sections replace, others merge. */
+function withConfigChange(prev: StorefrontConfig, section: string, updates: Record<string, unknown>): StorefrontConfig {
+  if (section === "__root") return { ...prev, ...updates };
+  if (ARRAY_CONFIG_KEYS.has(section)) return { ...prev, [section]: updates };
+  const prevSection = (prev as unknown as Record<string, Record<string, unknown> | undefined>)[section] ?? {};
+  return { ...prev, [section]: { ...prevSection, ...updates } };
+}
+
 export function useStoreData() {
   const emitEvent = useModuleEmit();
 
@@ -619,22 +629,17 @@ export function useStoreData() {
     });
   }
 
-  const ARRAY_CONFIG_KEYS = new Set(['sections', 'faqEntries']);
-
   function handleConfigChange(section: string, updates: Record<string, unknown>) {
-    setStorefrontConfig((prev) => {
-      if (section === "__root") {
-        return { ...prev, ...updates };
-      }
-      if (ARRAY_CONFIG_KEYS.has(section)) {
-        return { ...prev, [section]: updates };
-      }
-      const prevSection = (prev as unknown as Record<string, Record<string, unknown> | undefined>)[section] ?? {};
-      return {
-        ...prev,
-        [section]: { ...prevSection, ...updates },
-      };
-    });
+    setStorefrontConfig((prev) => withConfigChange(prev, section, updates));
+  }
+
+  /**
+   * P237: a change saved at once (Operations' store status). The save sends the config with the change in it:
+   * handleSaveConfig called in the same tick sends this render's storefrontConfig, from before the change.
+   */
+  function handleConfigChangeAndSave(section: string, updates: Record<string, unknown>) {
+    handleConfigChange(section, updates);
+    return saveConfig(withConfigChange(storefrontConfig, section, updates));
   }
 
   function handleReorderProducts(orderedIds: string[]) {
@@ -665,12 +670,16 @@ export function useStoreData() {
     handleConfigChange("catalog", { categoryEmphasis: updated });
   }
 
-  async function handleSaveConfig() {
+  function handleSaveConfig() {
+    return saveConfig(storefrontConfig);
+  }
+
+  async function saveConfig(config: StorefrontConfig) {
     if (!businessId) return;
     if (!isCurrent(businessId) || refuse(canSaveStorefront, "storefront settings")) return;
     const askedFor = businessId;
     setConfigSaving(true);
-    const res = await updateStorefrontConfig(askedFor, storefrontConfig);
+    const res = await updateStorefrontConfig(askedFor, config);
     if (!isCurrent(askedFor)) return;
     if (res.error) {
       toast.error("Failed to save storefront config");
@@ -734,6 +743,7 @@ export function useStoreData() {
     handleDeselectAll,
     handleConfigChange,
     handleSaveConfig,
+    handleConfigChangeAndSave,
     handleDeleteServiceFromStore,
     handleReorderProducts,
     handleItemOverrideChange,

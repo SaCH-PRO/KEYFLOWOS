@@ -53,7 +53,7 @@ import { OperationsMode } from "../operations-mode";
 /** The Operations tab as the Store page renders it (store/page.tsx). */
 function Operations() {
   const s = useStoreData();
-  if (s.loading) return <p>loading</p>;
+  if (s.loading || !s.businessId) return <p>loading</p>;
   return (
     <OperationsMode
       businessId={s.businessId}
