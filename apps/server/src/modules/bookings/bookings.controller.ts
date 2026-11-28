@@ -8,7 +8,7 @@ import { CalendarService, assertCalendarNamesReader, type CalendarNamesReader } 
 import { BookingOptimizerService } from './booking-optimizer.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
-import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
+import { ModuleScopeGuard, RequireAlternativeModuleScope, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingDto } from './dto/update-booking.dto';
 import { UpdateBookingStatusDto } from './dto/update-booking-status.dto';
@@ -16,7 +16,7 @@ import { CreateWaitlistEntryDto } from './dto/create-waitlist-entry.dto';
 import { OfferWaitlistSlotDto } from './dto/offer-waitlist-slot.dto';
 import { WaitlistQueryDto } from './dto/waitlist-query.dto';
 import { PlanLimitGuard, RequirePlanLimit } from '../subscriptions/plan-limit.guard';
-import { PublicCreateBookingDto } from './dto/public-create-booking.dto';
+import { MAX_PUBLIC_RELEASE_BOOKING_IDS, PublicCreateBookingDto } from './dto/public-create-booking.dto';
 import { appUrl } from '../../core/config/runtime-urls';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
@@ -345,6 +345,46 @@ export class BookingsController {
       throw new BadRequestException('startTime must be a valid ISO 8601 date string');
     }
 
+    const rawReplaceBookingId: unknown = body?.replaceBookingId;
+    if (
+      rawReplaceBookingId !== undefined &&
+      rawReplaceBookingId !== null &&
+      (typeof rawReplaceBookingId !== 'string' || rawReplaceBookingId.length > 200)
+    ) {
+      throw new BadRequestException('replaceBookingId must be a string up to 200 characters');
+    }
+    const replaceBookingId =
+      typeof rawReplaceBookingId === 'string' && rawReplaceBookingId.trim()
+        ? rawReplaceBookingId.trim()
+        : undefined;
+
+    const rawReleaseBookingIds: unknown = body?.releaseBookingIds;
+    let releaseBookingIds: string[] | undefined;
+    if (rawReleaseBookingIds !== undefined && rawReleaseBookingIds !== null) {
+      if (
+        !Array.isArray(rawReleaseBookingIds) ||
+        rawReleaseBookingIds.length > MAX_PUBLIC_RELEASE_BOOKING_IDS ||
+        rawReleaseBookingIds.some((id) => typeof id !== 'string' || id.length > 200)
+      ) {
+        throw new BadRequestException(
+          `releaseBookingIds must be an array of up to ${MAX_PUBLIC_RELEASE_BOOKING_IDS} strings`,
+        );
+      }
+      releaseBookingIds = rawReleaseBookingIds
+        .map((id) => id.trim())
+        .filter((id): id is string => id.length > 0);
+    }
+
+    const combinedDistinct = new Set<string>([
+      ...(replaceBookingId ? [replaceBookingId] : []),
+      ...(releaseBookingIds ?? []),
+    ]);
+    if (combinedDistinct.size > MAX_PUBLIC_RELEASE_BOOKING_IDS) {
+      throw new BadRequestException(
+        `At most ${MAX_PUBLIC_RELEASE_BOOKING_IDS} prior booking IDs may be released per request`,
+      );
+    }
+
     const limitCheck = await this.subscriptions.checkLimit(businessId, 'bookings');
     if (!limitCheck.allowed) {
       const limitLabel = limitCheck.limit === -1 ? 'unlimited' : String(limitCheck.limit);
@@ -382,6 +422,8 @@ export class BookingsController {
       referralCode: body.referralCode ? sanitizeString(body.referralCode, 100) : undefined,
       orgUnitId: body.orgUnitId ? sanitizeString(body.orgUnitId, 200) : undefined,
       paymentMethod,
+      replaceBookingId,
+      releaseBookingIds,
     });
   }
 
@@ -401,7 +443,8 @@ export class BookingsController {
    * V1-64: a body the catalog cannot store is a 400 (assertServiceCreateBody), not a 500.
    */
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
-  @RequireModuleScope('bookings', 'write')
+  @RequireModuleScope('storefront', 'write')
+  @RequireAlternativeModuleScope('bookings', 'admin')
   @Post('businesses/:businessId/services')
   createService(
     @Param('businessId') businessId: string,
@@ -432,7 +475,8 @@ export class BookingsController {
 
   /** @deprecated Use Catalog endpoint. Pass-through to CatalogService.updateService. */
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
-  @RequireModuleScope('bookings', 'write')
+  @RequireModuleScope('storefront', 'write')
+  @RequireAlternativeModuleScope('bookings', 'admin')
   @Patch('businesses/:businessId/services/:serviceId')
   async updateService(
     @Param('businessId') businessId: string,
@@ -454,7 +498,8 @@ export class BookingsController {
 
   /** @deprecated Use Catalog endpoint. Pass-through to CatalogService.deleteService. */
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
-  @RequireModuleScope('bookings', 'write')
+  @RequireModuleScope('storefront', 'write')
+  @RequireAlternativeModuleScope('bookings', 'admin')
   @Delete('businesses/:businessId/services/:serviceId')
   async deleteService(@Param('businessId') businessId: string, @Param('serviceId') serviceId: string) {
     await this.catalog.deleteService(businessId, serviceId);
@@ -463,7 +508,8 @@ export class BookingsController {
 
   /** @deprecated Use Catalog endpoint. Pass-through to CatalogService.batchServices. */
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
-  @RequireModuleScope('bookings', 'write')
+  @RequireModuleScope('storefront', 'write')
+  @RequireAlternativeModuleScope('bookings', 'admin')
   @Post('businesses/:businessId/services/batch')
   async batchServices(
     @Param('businessId') businessId: string,

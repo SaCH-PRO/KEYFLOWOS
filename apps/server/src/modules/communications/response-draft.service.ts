@@ -189,7 +189,7 @@ export class ResponseDraftService {
     const [items, total] = await Promise.all([
       this.prisma.client.responseDraft.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip: pagination?.skip ?? 0,
         take: pagination?.take ?? 50,
 

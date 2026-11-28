@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Inject, Param, Post, UseGuards }
 import { BookingsAiService } from './bookings-ai.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { CrmRateLimitGuard, CrmRateLimit } from '../crm/guards/rate-limit.guard';
 import { FeatureFlagGuard, RequireFeature } from '../crm/guards/feature-flag.guard';
 import { checkAiRateLimit } from '../crm/ai-rate-limit.util';
@@ -13,7 +14,8 @@ export class BookingsAiController {
     @Inject(BookingsAiService) private readonly bookingsAi: BookingsAiService,
   ) {}
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('bookings', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/ai-search')
@@ -31,7 +33,8 @@ export class BookingsAiController {
     return this.bookingsAi.naturalLanguageSearch(businessId, body.query);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('bookings', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/ai-schedule-optimizer')
@@ -40,7 +43,8 @@ export class BookingsAiController {
     return this.bookingsAi.scheduleOptimizer(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('bookings', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/ai-no-show-predictor')
@@ -49,7 +53,8 @@ export class BookingsAiController {
     return this.bookingsAi.noShowPredictor(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('bookings', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/ai-revenue-insights')

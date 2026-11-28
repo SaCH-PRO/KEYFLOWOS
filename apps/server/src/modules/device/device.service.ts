@@ -301,7 +301,7 @@ export class DeviceService {
     const [assets, total] = await Promise.all([
       this.prisma.client.mediaAsset.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: filters?.limit ?? 50,
         skip: filters?.offset ?? 0,
       }),
@@ -335,10 +335,9 @@ export class DeviceService {
     const [items, total] = await Promise.all([
       this.prisma.client.visualIntake.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: filters?.limit ?? 50,
         skip: filters?.offset ?? 0,
-
       }),
       this.prisma.client.visualIntake.count({ where }),
     ]);
@@ -413,7 +412,7 @@ export class DeviceService {
     const [items, total] = await Promise.all([
       this.prisma.client.voiceSession.findMany({
         where: { businessId },
-        orderBy: { startedAt: 'desc' },
+        orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
         take: limit,
         skip: offset,
       }),

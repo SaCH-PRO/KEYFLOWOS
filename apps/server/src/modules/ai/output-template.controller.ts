@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Inject, Param, Post, Put, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { OutputTemplateService, CreateOutputTemplateDto, UpdateOutputTemplateDto } from './output-template.service';
 import { OutputCategory } from './ai-quality';
 
@@ -31,7 +32,8 @@ export class OutputTemplateController {
     return this.service.getTemplate(businessId, id);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'write')
   @Post('businesses/:businessId/output-templates')
   async create(
     @Param('businessId') businessId: string,
@@ -40,7 +42,8 @@ export class OutputTemplateController {
     return this.service.createTemplate(businessId, body);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'write')
   @Put('businesses/:businessId/output-templates/:id')
   async update(
     @Param('businessId') businessId: string,
@@ -50,7 +53,8 @@ export class OutputTemplateController {
     return this.service.updateTemplate(businessId, id, body);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'write')
   @Delete('businesses/:businessId/output-templates/:id')
   async remove(
     @Param('businessId') businessId: string,
@@ -59,7 +63,8 @@ export class OutputTemplateController {
     return this.service.deleteTemplate(businessId, id);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'write')
   @Post('businesses/:businessId/output-templates/:id/set-default')
   async setDefault(
     @Param('businessId') businessId: string,
@@ -68,7 +73,8 @@ export class OutputTemplateController {
     return this.service.setDefault(businessId, id);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'write')
   @Post('businesses/:businessId/output-templates/reset/:category')
   async resetCategory(
     @Param('businessId') businessId: string,
@@ -77,7 +83,8 @@ export class OutputTemplateController {
     return this.service.resetToDefault(businessId, category);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'write')
   @Post('businesses/:businessId/output-templates/preview')
   async preview(
     @Param('businessId') businessId: string,

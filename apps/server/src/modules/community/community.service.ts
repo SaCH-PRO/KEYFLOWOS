@@ -97,7 +97,7 @@ export class CommunityService {
     const [data, total] = await Promise.all([
       this.prisma.client.communityPost.findMany({
         where,
-        orderBy: [{ isPinned: 'desc' }, { createdAt: 'desc' }],
+        orderBy: [{ isPinned: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
         include: {
           business: {
             select: {
@@ -476,9 +476,14 @@ export class CommunityService {
     const limit = filters.limit ?? 20;
     const skip = (page - 1) * limit;
 
-    let orderBy: any = { profileCompleteness: 'desc' };
-    if (filters.sort === 'newest') orderBy = { createdAt: 'desc' };
-    if (filters.sort === 'name') orderBy = { name: 'asc' };
+    const orderBy =
+      filters.sort === 'newest'
+        ? [{ createdAt: 'desc' as const }, { id: 'desc' as const }]
+        : filters.sort === 'name'
+          ? [{ name: 'asc' as const }, { id: 'asc' as const }]
+          : filters.sort
+            ? [{ profileCompleteness: 'desc' as const }, { id: 'desc' as const }]
+            : [{ profileCompleteness: 'desc' as const }, { createdAt: 'desc' as const }, { id: 'desc' as const }];
 
     const [data, total] = await Promise.all([
       this.prisma.client.business.findMany({
@@ -536,7 +541,7 @@ export class CommunityService {
         },
         skip,
         take: limit,
-        orderBy: filters.sort ? orderBy : [{ profileCompleteness: 'desc' }, { createdAt: 'desc' }],
+        orderBy,
       }),
       this.prisma.client.business.count({ where }),
     ]);
@@ -1154,7 +1159,7 @@ export class CommunityService {
         },
         skip,
         take: limit,
-        orderBy: [{ profileCompleteness: 'desc' }, { createdAt: 'desc' }],
+        orderBy: [{ profileCompleteness: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
       }),
       this.prisma.client.business.count({ where }),
     ]);
@@ -1491,7 +1496,7 @@ export class CommunityService {
     const [messages, total] = await Promise.all([
       this.prisma.client.directMessage.findMany({
         where: { conversationId },
-        orderBy: { createdAt: 'asc' },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
         include: {
           senderBusiness: { select: this.businessSelect },
         },
@@ -1655,7 +1660,7 @@ export class CommunityService {
     const [data, total, unreadCount] = await Promise.all([
       this.prisma.client.communityNotification.findMany({
         where: { businessId },
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip,
         take: limit,
       }),

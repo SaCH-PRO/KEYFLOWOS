@@ -159,6 +159,8 @@ const EXEMPT: Record<string, string> = {
   replyGmailThread: GMAIL,
   backfillStoreLinks: 'store/backfill-links: storefront link maintenance, not an invoice, quote or payment write',
   listPaymentClaims: 'claims: read-only GET listing of pending customer payment claims (D-46 rules writes; confirm/dismiss are GUARDED)',
+  setProductTierPrices: PRODUCTS,
+  setContactPricingTier: 'contacts/:contactId/pricing-tier: contact pricing tier metadata, not an invoice, quote or payment write (D-46 is ruled for invoice writes)',
 };
 
 /**
@@ -1071,6 +1073,22 @@ describe('D46-S09 (W4-TRASH-D46, D-46; review SEC-W3D46R-3): TrashController res
     expect((await trashModels()).sort()).toEqual(Object.keys(D95_MODULE).sort());
     for (const [model, module] of Object.entries(D95_MODULE)) {
       for (const handler of ['restore', 'permanentDelete'] as const) {
+        if (model === 'service') {
+          // P234 (D-317 Option B): service writes (including trash restore/permanentDelete) require
+          // storefront:write OR bookings:admin; default STAFF (bookings:write, storefront:read) is refused.
+          const staff = await trashCall(handler, model, { id: USER_ID, role: 'USER' }, { role: 'ADMIN', permissionScopes: scopesWith({ storefront: 'read', bookings: 'write' }) });
+          expect(staff.error, `${model} ${handler}: ${String(staff.error)}`).toBeInstanceOf(ForbiddenException);
+          expect((staff.error as Error).message, `${model} ${handler}`).toBe('Insufficient permissions: requires storefront write or bookings admin access (you have storefront:read, bookings:write)');
+          expect(staff.calls.map((c) => c.path), `${model} ${handler}`).toEqual([MEMBERSHIP_LOOKUP]);
+
+          for (const allowedScopes of [{ storefront: 'write' }, { bookings: 'admin' }] as const) {
+            const writer = await trashCall(handler, model, { id: USER_ID, role: 'USER' }, { role: 'STAFF', permissionScopes: allowedScopes });
+            expect(writer.error, `${model} ${handler}: ${String(writer.error)}`).not.toBeInstanceOf(ForbiddenException);
+            expect(writer.calls[0]?.path, `${model} ${handler}`).toBe(MEMBERSHIP_LOOKUP);
+            expect(writer.calls.slice(1).map(modelOf), `${model} ${handler}: the lookup ran`).toContain(model);
+          }
+          continue;
+        }
         const reader = await trashCall(handler, model, { id: USER_ID, role: 'USER' }, { role: 'ADMIN', permissionScopes: scopesWith({ [module]: 'read' }) });
         expect(reader.error, `${model} ${handler}: ${String(reader.error)}`).toBeInstanceOf(ForbiddenException);
         expect((reader.error as Error).message, `${model} ${handler}`).toBe(`Insufficient permissions: ${module} requires write access (you have read)`);

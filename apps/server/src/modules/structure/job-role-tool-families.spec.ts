@@ -133,7 +133,6 @@
  *  projects_create_task         ProjectsService          POST /projects/businesses/:businessId/projects/:projectId/tasks  projects:write
  *  projects_get_budget          ProjectsService          GET /projects/businesses/:businessId/projects/:projectId/budget  projects:read
  *  inventory_adjust_stock       MarketplaceService       POST /marketplace/businesses/:businessId/inventory/adjust     storefront:write
- *  approval_create_request      ApprovalRequestService   POST /businesses/:businessId/approvals                        operations:write
  *  save_onboarding_step         OnboardingStateService   POST /onboarding-concierge/businesses/:businessId/onboarding-step  settings:write
  *
  * NOT GRANTED although their family is (rule 4; UNGRANTED below): among them
@@ -1333,7 +1332,6 @@ const EVIDENCE: Array<{ tool: string; service: string; route: string; scope: str
   { tool: 'payroll_approve_run', service: 'PayrollService', route: 'POST /payroll/businesses/:businessId/runs/:runId/approve', scope: 'operations:write', file: 'modules/payroll/payroll.controller.ts' },
   { tool: 'payroll_list_rates', service: 'PayrollService', route: 'GET /payroll/businesses/:businessId/rates', scope: 'operations:read', file: 'modules/payroll/payroll.controller.ts' },
   { tool: 'performance_take_snapshot', service: 'StaffPerformanceService', route: 'POST /staff-performance/businesses/:businessId/snapshot', scope: 'operations:write', file: 'modules/staff-performance/staff-performance.controller.ts' },
-  { tool: 'approval_create_request', service: 'ApprovalRequestService', route: 'POST /businesses/:businessId/approvals', scope: 'operations:write', file: 'modules/approvals/approval.controller.ts' },
   { tool: 'save_onboarding_step', service: 'OnboardingStateService', route: 'POST /onboarding-concierge/businesses/:businessId/onboarding-step', scope: 'settings:write', file: 'modules/onboarding-concierge/onboarding-concierge.controller.ts' },
   // SWP-CENSUS-KEY-B (P109, Ruling B2): KeyCortexGoalsController write routes require ai write
   { tool: 'goals_create', service: 'KeyCortexPlannerService', route: 'POST /api/v1/cortex/goals', scope: 'ai:write', file: 'modules/key-cortex/key-cortex-goals.controller.ts' },
@@ -1349,7 +1347,7 @@ const EVIDENCE: Array<{ tool: string; service: string; route: string; scope: str
  */
 const UNMAPPED: Record<string, string> = {
   // apply: granted since SWP-CENSUS-V1-A (P87) gated CatalogController.updateProduct (revenue write)
-  // approval: granted since SWP-CENSUS-V1-B (P90) gated ApprovalController write routes (operations write)
+  approval: 'P206 (FU-TODAY-APPROVALS-STAFF, D-298): ApprovalController.create moved to per-requestType assertMayCreateApprovalRequest; listForBusiness is unscoped; decideStep is GOVERNED_UNGRANTED (AMBIENT-BOUND)',
   automations: 'FlowService.createAutomation/updateAutomation back no route; playbook routes (automation.controller) are unscoped',
   // bookings: granted since SWP-CENSUS-V1-A (P87) gated BookingsController write routes (bookings write)
   comms: 'CommunicationsService.sendBroadcast backs no route',
@@ -1394,6 +1392,7 @@ const UNMAPPED: Record<string, string> = {
 
 /** The governed tools in UNMAPPED families (rule 4: GOVERNED_UNGRANTED). */
 const UNMAPPED_GOVERNED: Record<string, string[]> = {
+  approval: ['operations'],
   execute: ['ai', 'bookings', 'content', 'crm', 'expenses', 'operations', 'projects', 'revenue', 'settings', 'storefront', 'team'],
   send: ['crm'],
 };
@@ -1404,15 +1403,17 @@ const UNMAPPED_GOVERNED: Record<string, string[]> = {
  * granted exactly these (SEC-V21b-02: payroll_set_rate, payroll_generate_run, ...).
  */
 const UNGRANTED: Record<string, string> = {
-  // SWP-CENSUS-V1-B (P90): approval family now grants approval_create_request (operations write); list stays unscoped and decideStep is ambient-bound
-  approval_decide_step: 'ApprovalRequestService.decideStep finds the approval request by its bare id (GOVERNED_UNGRANTED, AMBIENT-BOUND; operations:write is only a floor)',
-  approval_list: 'ApprovalRequestService.listForBusiness is reached by approval.controller GET, which is unscoped',
   // SWP-CENSUS-V1-A (P87): bookings family now grants its write tools (bookings write); reads stay ungranted and offerSlot is ambient-bound
   bookings_list_bookings: 'reads Prisma directly; no service call',
   bookings_list_services: 'reads Prisma directly; no service call',
   bookings_list_waitlist: 'BookingWaitlistService.listWaitlist is reached by bookings.controller GET, which is unscoped',
   bookings_offer_waitlist_slot: 'BookingWaitlistService.offerSlot finds the waitlist entry by its bare id (GOVERNED_UNGRANTED, AMBIENT-BOUND; bookings:write is only a floor)',
   calendar_check_conflicts: 'reads Prisma directly; no service call (baseline read for every position)',
+  commerce_summarize_revenue: 'reads Prisma directly; no service call (P160: governed by GRAPH_ACTION_EXTRA_SCOPES revenue:read + KEY_BOOKS_MEMBERSHIP_READ_TOOLS)',
+  crm_create_reminder: 'reads Prisma directly; no service call (P160: writes ContactTask with required contactId; governed by GRAPH_ACTION_EXTRA_SCOPES crm:write)',
+  crm_recommend_follow_ups: 'reads Prisma directly; no service call (P160: governed by GRAPH_ACTION_EXTRA_SCOPES crm:read + GRAPH_ACTION_CONTACT_READ_TOOLS)',
+  finance_create_invoice_reminder_draft: 'reads Prisma directly; no service call (P160: governed by GRAPH_ACTION_EXTRA_SCOPES revenue:write + KEY_BOOKS_MEMBERSHIP_READ_TOOLS)',
+  finance_list_overdue_invoices: 'reads Prisma directly; no service call (P160: governed by GRAPH_ACTION_EXTRA_SCOPES revenue:read + KEY_BOOKS_MEMBERSHIP_READ_TOOLS)',
   commerce_send_invoice:
     "mails the invoice's customer through TransactionalEmailService.send, which no member route makes run for a customer (drive email-content mails only the caller: ARGUMENT_BOUND), with a pay link from CommerceService.automatedInvoiceUrl, which backs no route (V1-46b), so revenue:write (updateInvoiceStatus) is only a floor (review 7 DRV5-2)",
   // commerce_create_product / commerce_update_product: granted (revenue write) since SWP-CENSUS-V1-A (P87) gated CatalogController product writes
@@ -1721,10 +1722,10 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
       },
       analytics: {},
       operations: {
-        // SWP-CENSUS-V1-B (P90): ApprovalController.create requires operations write
-        approval_create_request: 'write',
+        // P206 (FU-TODAY-APPROVALS-STAFF, D-298): ApprovalController.create moved to per-requestType assertMayCreateApprovalRequest
         // command_* and procurement_*: D-40 put the command-centre item and procurement routes
         // under operations (R0-13g-OPS-SCOPE-COMMAND-PROCUREMENT)
+        command_create_item: 'write',
         command_discharge_obligation: 'write',
         command_list_due_obligations: 'read',
         contract_create_tag: 'write',

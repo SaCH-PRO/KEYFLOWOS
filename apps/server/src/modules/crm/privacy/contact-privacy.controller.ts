@@ -23,7 +23,6 @@ import {
 } from '../../../core/auth/module-scope.guard';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { assertContactVisible, type CrmAccess } from '../crm-permissions.helper';
-import { contactWhereWithId } from '../crm.helpers';
 import { ContactAuditService } from './contact-audit.service';
 import { ContactPrivacyService } from './contact-privacy.service';
 
@@ -153,8 +152,15 @@ export class ContactPrivacyController {
     @Req() req: Request & { user?: { id?: string; email?: string } },
   ) {
     const actor = actorUserId(req);
-    const access = await assertContactVisible(this.prisma, businessId, contactId, actor);
+    const access = await assertContactVisible(this.prisma, businessId, contactId, actor, { includeDeleted: true });
     await this.assertMayDelete(businessId, contactId, actor, access);
+    const openForget = await this.prisma.client.contactForgetRequest.findUnique({
+      where: { contactId },
+      select: { businessId: true, status: true },
+    });
+    if (openForget && openForget.businessId === businessId && openForget.status === 'requested') {
+      throw new NotFoundException('Contact not found');
+    }
     const meta = clientMeta(req);
     return this.privacy.requestForget({
       businessId,
@@ -224,10 +230,12 @@ export class ContactPrivacyController {
     if (access.deleteScope === 'none') {
       throw new ForbiddenException('You do not have permission to delete contacts');
     }
-    const contact = await this.prisma.client.contact.findFirst({
-      where: contactWhereWithId(businessId, contactId),
-      select: { ownerId: true },
-    });
+    const rows = await this.prisma.client.$queryRaw<Array<{ ownerId: string | null }>>`
+      SELECT owner_id AS "ownerId"
+        FROM contacts
+       WHERE id = ${contactId}
+         AND business_id = ${businessId}`;
+    const contact = rows[0];
     if (!contact) throw new NotFoundException('Contact not found');
     if (access.deleteScope === 'owned' && contact.ownerId !== actor) {
       throw new ForbiddenException('You can only delete contacts you own');

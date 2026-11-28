@@ -1,20 +1,20 @@
 /**
- * V1-09-KEY-COMMAND-GOVERNED — a read-only, governed 'ask' mode (M44).
+ * V1-09-KEY-COMMAND-GOVERNED / P160 (RR-LEGACY-FALLBACK-REMOVE) — a read-only, governed 'ask' mode.
  *
  * POST /ai/businesses/:businessId/key/command with mode 'ask' is LLM-free:
  * interpretIntent -> planActions -> executeApprovedPlan (ai.controller.ts).
- * At the V1 base executeApprovedPlan ran every planned step at a hard-coded
- * autonomyLevel 2 without consulting AiOversightService or the autonomy kill
- * switch, 'scan drive' planned a real Google Drive sync at LOW risk, and an
- * unrecognised ask planned contacts.searchContacts, which no registry serves.
  *
- * After: 'ask' executes only read-tier capabilities, each one after an
- * oversight check and a kill-switch check, both failing closed; anything else
- * is reported as not executed. 'scan drive' requires approval. An
- * unrecognised ask plans nothing and says so.
+ * 'ask' executes only canonical read-tier capabilities, each one after an
+ * oversight check, business module/tool block check, member scope check, and
+ * kill-switch check, all failing closed; anything else is reported as not
+ * executed. Obsolete hidden-v1 tools (connect.scanDrive, connect.listDriveIntake,
+ * messages.listMessageIntake, social.listRecentEngagement) fail closed with a
+ * plain refusal. An unrecognised ask plans nothing and says so.
  */
 import { describe, expect, it, vi } from 'vitest';
+import { FLOW_TOOLS } from './flow-tool-registry';
 import { KeyCommandService, type KeyCommandPlan } from './key-command.service';
+import { getLegacyToolEquivalence } from './legacy-tool-equivalence';
 
 type Def = { name: string; module: string; riskTier: 1 | 2 | 3 | 4; requiresApproval: boolean };
 
@@ -27,16 +27,13 @@ const AUTO = {
   reason: 'Tier 1 auto-approved (max auto tier: 1)',
 };
 
-/** The legacy KeyToolRegistryService tools 'ask' plans, with their declared tiers. */
-const LEGACY: Def[] = [
-  { name: 'summarizeRevenue', module: 'commerce', riskTier: 1, requiresApproval: false },
-  { name: 'recommendFollowUps', module: 'contacts', riskTier: 1, requiresApproval: false },
-  { name: 'createCommandItem', module: 'contacts', riskTier: 1, requiresApproval: false },
-  { name: 'scanDrive', module: 'connect', riskTier: 1, requiresApproval: false },
-  { name: 'listDriveIntake', module: 'connect', riskTier: 1, requiresApproval: false },
-  { name: 'listMessageIntake', module: 'messages', riskTier: 1, requiresApproval: false },
-  { name: 'listRecentEngagement', module: 'social', riskTier: 1, requiresApproval: false },
-];
+/** Default canonical capabilities wired into the harness (promoted FLOW_TOOLS). */
+const DEFAULT_CANONICAL: Def[] = FLOW_TOOLS.map((t) => ({
+  name: t.name,
+  module: t.family,
+  riskTier: t.riskTier,
+  requiresApproval: false,
+}));
 
 /** The business policy oversight reads (AiOversightService.getAutonomySettings). */
 const POLICY = {
@@ -65,8 +62,8 @@ function harness(
     memberLookup?: Error;
     policy?: Partial<typeof POLICY> & { degraded?: boolean };
     policyRead?: Error;
-    /** What the legacy registry's execute answers. */
-    legacyResult?: Record<string, unknown>;
+    /** What the canonical registry's execute answers. */
+    canonicalResult?: Record<string, unknown>;
     /** Ids the contact visibility query returns. */
     visibleContactIds?: string[];
   } = {},
@@ -95,15 +92,10 @@ function harness(
     },
   };
   const timeline = { recordEvent: vi.fn().mockResolvedValue(undefined) };
-  const canonicalTools = new Map((opts.canonical ?? []).map((t) => [t.name, t]));
-  const legacyTools = new Map(LEGACY.map((t) => [`${t.module}.${t.name}`, t]));
+  const canonicalTools = new Map((opts.canonical ?? DEFAULT_CANONICAL).map((t) => [t.name, t]));
   const canonical = {
     getTool: vi.fn((name: string) => canonicalTools.get(name)),
-    execute: vi.fn().mockResolvedValue({ success: true, data: { from: 'canonical' } }),
-  };
-  const legacy = {
-    getTool: vi.fn((module: string, name: string) => legacyTools.get(`${module}.${name}`)),
-    execute: vi.fn().mockResolvedValue(opts.legacyResult ?? { success: true, data: { from: 'legacy' } }),
+    execute: vi.fn().mockResolvedValue(opts.canonicalResult ?? { success: true, data: { from: 'canonical' } }),
   };
   const decision = opts.decision ?? AUTO;
   const oversight = {
@@ -127,12 +119,11 @@ function harness(
   const service = new KeyCommandService(
     prisma as any,
     timeline as any,
-    legacy as any,
     {} as any,
     canonical as any,
     ...([opts.withOversight === false ? undefined : oversight, opts.withSafety === false ? undefined : safety] as any[]),
   );
-  return { service, prisma, timeline, canonical, legacy, oversight, safety };
+  return { service, prisma, timeline, canonical, oversight, safety };
 }
 
 function plan(tool: string, module: string, input: Record<string, unknown> = {}): KeyCommandPlan {
@@ -159,11 +150,10 @@ function lastLedgerEvent(timeline: ReturnType<typeof harness>['timeline']): Reco
 }
 
 function expectNothingRan(h: ReturnType<typeof harness>) {
-  expect(h.legacy.execute).not.toHaveBeenCalled();
   expect(h.canonical.execute).not.toHaveBeenCalled();
 }
 
-describe("V1-09 'scan drive' requires approval", () => {
+describe("V1-09 / P160 'scan drive' requires approval in plan and is refused as OBSOLETE in execution", () => {
   it('plans the Drive sync as an approval-required step, not a LOW read', async () => {
     const h = harness({ rawInput: 'scan drive for new documents' });
 
@@ -177,7 +167,7 @@ describe("V1-09 'scan drive' requires approval", () => {
     expect(h.service.classifyRisk(planned)).not.toBe('LOW');
   });
 
-  it("does not run the sync from 'ask': the step is reported as awaiting approval", async () => {
+  it("does not run the sync from 'ask': connect.scanDrive is refused as OBSOLETE (hidden v1 module, D-152)", async () => {
     const h = harness({ rawInput: 'sync drive' });
     const planned = await h.service.planActions('cmd_1', await h.service.interpretIntent('cmd_1'));
 
@@ -185,8 +175,9 @@ describe("V1-09 'scan drive' requires approval", () => {
 
     expectNothingRan(h);
     expect(results).toHaveLength(1);
-    expect(results[0]).toMatchObject({ success: false, notExecuted: true, requiresApproval: true });
-    expect(lastStatus(h.prisma)).not.toBe('EXECUTED');
+    expect(results[0]).toMatchObject({ success: false, notExecuted: true, tool: 'connect.scanDrive' });
+    expect(results[0].error).toMatch(/obsolete/i);
+    expect(lastStatus(h.prisma)).toBe('REJECTED');
   });
 });
 
@@ -227,21 +218,20 @@ describe('V1-09 an unrecognised ask plans nothing and says so', () => {
   });
 });
 
-describe("V1-09 'ask' executes read-tier capabilities only after an oversight check", () => {
-  it('asks AiOversightService before executing a legacy read, then runs it at INTERNAL_EXEC', async () => {
+describe("V1-09 'ask' executes canonical read-tier capabilities only after an oversight check", () => {
+  it('asks AiOversightService before executing a promoted canonical read, then runs it at INTERNAL_EXEC', async () => {
     const h = harness();
 
     const results = await h.service.executeApprovedPlan('cmd_1', plan('summarizeRevenue', 'commerce'), 'biz_1', 'user_1');
 
-    expect(h.oversight.evaluate).toHaveBeenCalledWith('biz_1', 'commerce.summarizeRevenue');
-    expect(h.legacy.execute).toHaveBeenCalledWith(
-      'commerce',
-      'summarizeRevenue',
+    expect(h.oversight.evaluate).toHaveBeenCalledWith('biz_1', 'commerce_summarize_revenue');
+    expect(h.canonical.execute).toHaveBeenCalledWith(
+      'commerce_summarize_revenue',
       expect.objectContaining({ businessId: 'biz_1', userId: 'user_1', commandId: 'cmd_1', autonomyLevel: 2 }),
       {},
     );
-    expect(h.oversight.evaluate.mock.invocationCallOrder[0]).toBeLessThan(h.legacy.execute.mock.invocationCallOrder[0]);
-    expect(results[0]).toMatchObject({ success: true });
+    expect(h.oversight.evaluate.mock.invocationCallOrder[0]).toBeLessThan(h.canonical.execute.mock.invocationCallOrder[0]);
+    expect(results[0]).toMatchObject({ success: true, tool: 'commerce_summarize_revenue' });
     expect(lastStatus(h.prisma)).toBe('EXECUTED');
   });
 
@@ -260,7 +250,7 @@ describe("V1-09 'ask' executes read-tier capabilities only after an oversight ch
       decision: { ...AUTO, allowed: false, reason: 'AI is in restricted mode — no actions allowed' },
     });
 
-    const results = await h.service.executeApprovedPlan('cmd_1', plan('listMessageIntake', 'messages'), 'biz_1', 'user_1');
+    const results = await h.service.executeApprovedPlan('cmd_1', plan('summarizeRevenue', 'commerce'), 'biz_1', 'user_1');
 
     expectNothingRan(h);
     expect(results[0]).toMatchObject({ success: false, notExecuted: true });
@@ -299,8 +289,8 @@ describe("V1-09 'ask' executes read-tier capabilities only after an oversight ch
   });
 });
 
-describe("V1-09 'ask' honours the autonomy kill switch on every registry path", () => {
-  it('runs no legacy read while the business kill switch is on', async () => {
+describe("V1-09 'ask' honours the autonomy kill switch on every path", () => {
+  it('runs no canonical read while the business kill switch is on', async () => {
     const h = harness({ killSwitch: true });
 
     const results = await h.service.executeApprovedPlan('cmd_1', plan('summarizeRevenue', 'commerce'), 'biz_1', 'user_1');
@@ -340,28 +330,27 @@ describe("V1-09 'ask' is read-only", () => {
     expect(results[0]).toMatchObject({ success: false, notExecuted: true, requiresApproval: true });
   });
 
-  it('does not execute a legacy tier-1 write (contacts.createCommandItem) planned LOW', async () => {
+  it('does not execute a promoted tier-1 write (contacts.createCommandItem -> command_create_item) planned LOW', async () => {
     const h = harness();
 
     const results = await h.service.executeApprovedPlan('cmd_1', plan('createCommandItem', 'contacts', { title: 't' }), 'biz_1', 'user_1');
 
     expectNothingRan(h);
-    expect(results[0]).toMatchObject({ success: false, notExecuted: true, requiresApproval: true });
+    expect(results[0]).toMatchObject({ success: false, notExecuted: true, requiresApproval: true, tool: 'command_create_item' });
   });
 
-  it('keeps answering every read intent it plans (control)', async () => {
+  it('keeps answering every active v1 read intent it plans (control)', async () => {
+    // Hidden v1 intents (social, connect, messages intake) are OBSOLETE per P154/P160 (D-152/D-153).
     const intents = [
-      { domain: 'commerce', action: 'revenue_summary' },
-      { domain: 'contacts', action: 'follow_up' },
-      { domain: 'connect', action: 'drive_findings' },
-      { domain: 'messages', action: 'message_intake' },
-      { domain: 'social', action: 'recent_engagement' },
+      { domain: 'commerce', action: 'revenue_summary', expectedCanonical: 'commerce_summarize_revenue' },
+      { domain: 'contacts', action: 'follow_up', expectedCanonical: 'crm_recommend_follow_ups' },
     ];
     for (const intent of intents) {
       const h = harness();
       const planned = await h.service.planActions('cmd_1', intent);
       const results = await h.service.executeApprovedPlan('cmd_1', planned, 'biz_1', 'user_1');
-      expect(h.legacy.execute, `${intent.domain}.${intent.action}`).toHaveBeenCalledTimes(1);
+      expect(h.canonical.execute, `${intent.domain}.${intent.action}`).toHaveBeenCalledTimes(1);
+      expect(h.canonical.execute.mock.calls[0][0]).toBe(intent.expectedCanonical);
       expect(results.every((r) => r.success), `${intent.domain}.${intent.action}`).toBe(true);
     }
   });
@@ -382,13 +371,13 @@ const FOLLOW_UPS = {
 
 describe("SEC-V109-1 'ask' reads only what the asking member may read", () => {
   it('runs no follow-up read for a member whose crm scope is none', async () => {
-    const h = harness({ member: { role: 'STAFF', permissionScopes: { crm: 'none' } }, legacyResult: FOLLOW_UPS });
+    const h = harness({ member: { role: 'STAFF', permissionScopes: { crm: 'none' } }, canonicalResult: FOLLOW_UPS });
 
     const results = await h.service.executeApprovedPlan('cmd_1', plan('recommendFollowUps', 'contacts'), 'biz_1', 'user_1');
 
     expectNothingRan(h);
-    expect(results[0]).toMatchObject({ success: false, notExecuted: true, tool: 'contacts.recommendFollowUps' });
-    expect(results[0].error).toMatch(/crm read access/);
+    expect(results[0]).toMatchObject({ success: false, notExecuted: true, tool: 'crm_recommend_follow_ups' });
+    expect(results[0].error).toMatch(/crm requires read access/);
     expect(JSON.stringify(results)).not.toContain('private@example.test');
     expect(lastStatus(h.prisma)).toBe('REJECTED');
   });
@@ -396,13 +385,14 @@ describe("SEC-V109-1 'ask' reads only what the asking member may read", () => {
   it("filters the follow-ups by the member's CRM visibility clause before returning them", async () => {
     const h = harness({
       member: { role: 'STAFF', permissionScopes: { crm: 'read' } },
-      legacyResult: FOLLOW_UPS,
+      canonicalResult: FOLLOW_UPS,
       visibleContactIds: ['c_team'],
     });
 
     const results = await h.service.executeApprovedPlan('cmd_1', plan('recommendFollowUps', 'contacts'), 'biz_1', 'user_1');
 
-    expect(h.legacy.execute).toHaveBeenCalledTimes(1);
+    expect(h.canonical.execute).toHaveBeenCalledTimes(1);
+    expect(h.canonical.execute.mock.calls[0][0]).toBe('crm_recommend_follow_ups');
     expect(h.prisma.client.contact.findMany).toHaveBeenCalledWith({
       where: {
         businessId: 'biz_1',
@@ -417,7 +407,7 @@ describe("SEC-V109-1 'ask' reads only what the asking member may read", () => {
   });
 
   it('returns every follow-up to the OWNER without a visibility query (control)', async () => {
-    const h = harness({ legacyResult: FOLLOW_UPS });
+    const h = harness({ canonicalResult: FOLLOW_UPS });
 
     const results = await h.service.executeApprovedPlan('cmd_1', plan('recommendFollowUps', 'contacts'), 'biz_1', 'user_1');
 
@@ -432,7 +422,7 @@ describe("SEC-V109-1 'ask' reads only what the asking member may read", () => {
 
     expectNothingRan(h);
     expect(results[0]).toMatchObject({ success: false, notExecuted: true });
-    expect(results[0].error).toMatch(/revenue read access/);
+    expect(results[0].error).toMatch(/revenue requires read access/);
   });
 
   it('a STAFF member with role-default scopes still reads revenue (control)', async () => {
@@ -440,7 +430,8 @@ describe("SEC-V109-1 'ask' reads only what the asking member may read", () => {
 
     const results = await h.service.executeApprovedPlan('cmd_1', plan('summarizeRevenue', 'commerce'), 'biz_1', 'user_1');
 
-    expect(h.legacy.execute).toHaveBeenCalledTimes(1);
+    expect(h.canonical.execute).toHaveBeenCalledTimes(1);
+    expect(h.canonical.execute.mock.calls[0][0]).toBe('commerce_summarize_revenue');
     expect(results[0]).toMatchObject({ success: true });
   });
 
@@ -465,41 +456,24 @@ describe("SEC-V109-1 'ask' reads only what the asking member may read", () => {
     expect(results[0]).toMatchObject({ success: false, notExecuted: true });
   });
 
-  it('a read of business-wide data needs no member scope (control)', async () => {
-    const h = harness({ member: { role: 'STAFF', permissionScopes: { crm: 'none', revenue: 'none' } } });
-
-    const results = await h.service.executeApprovedPlan('cmd_1', plan('listMessageIntake', 'messages'), 'biz_1');
-
-    expect(h.legacy.execute).toHaveBeenCalledTimes(1);
-    expect(results[0]).toMatchObject({ success: true });
-  });
-
   it("keeps a member-scoped read's outcome on the KeyCommand row without its data, which only the asker receives", async () => {
-    const h = harness({ legacyResult: FOLLOW_UPS });
+    const h = harness({ canonicalResult: FOLLOW_UPS });
 
     const results = await h.service.executeApprovedPlan('cmd_1', plan('recommendFollowUps', 'contacts'), 'biz_1', 'user_1');
 
     expect(results[0].data).toEqual(FOLLOW_UPS.data);
     const persisted = lastExecutionResult(h.prisma);
-    expect(persisted.outputs[0]).toMatchObject({ success: true, tool: 'contacts.recommendFollowUps', dataWithheld: true });
+    expect(persisted.outputs[0]).toMatchObject({ success: true, tool: 'crm_recommend_follow_ups', dataWithheld: true });
     expect(persisted.outputs[0]).not.toHaveProperty('data');
     expect(JSON.stringify(persisted)).not.toContain('private@example.test');
   });
-
-  it('keeps the data of a business-wide read on the KeyCommand row (control)', async () => {
-    const h = harness({ legacyResult: { success: true, data: { items: [{ id: 'mi_1' }], count: 1 } } });
-
-    await h.service.executeApprovedPlan('cmd_1', plan('listMessageIntake', 'messages'), 'biz_1', 'user_1');
-
-    expect(lastExecutionResult(h.prisma).outputs[0]).toMatchObject({ data: { items: [{ id: 'mi_1' }], count: 1 } });
-  });
 });
 
-describe("SEC-V109-2 'ask' honours the business's module and tool blocks on dotted reads", () => {
+describe("SEC-V109-2 'ask' honours the business's module and tool blocks on promoted reads", () => {
   it.each([
     ['contacts.recommendFollowUps', 'recommendFollowUps', 'contacts', 'crm'],
     ['commerce.summarizeRevenue', 'summarizeRevenue', 'commerce', 'commerce'],
-    ['social.listRecentEngagement', 'listRecentEngagement', 'social', 'content'],
+    ['commerce.summarizeRevenue', 'summarizeRevenue', 'commerce', 'revenue'],
   ])('runs no %s while blockedModules holds %s', async (_name, tool, module, blockedModule) => {
     const h = harness({ policy: { blockedModules: [blockedModule] } });
 
@@ -510,13 +484,13 @@ describe("SEC-V109-2 'ask' honours the business's module and tool blocks on dott
     expect(results[0].error).toContain(`Module "${blockedModule}" is blocked`);
   });
 
-  it('runs no read whose bare tool name is in blockedTools', async () => {
-    const h = harness({ policy: { blockedTools: ['summarizeRevenue'] } });
-
-    const results = await h.service.executeApprovedPlan('cmd_1', plan('summarizeRevenue', 'commerce'), 'biz_1', 'user_1');
-
-    expectNothingRan(h);
-    expect(results[0].error).toContain('Tool "summarizeRevenue" is blocked');
+  it('runs no read whose bare legacy or canonical tool name is in blockedTools', async () => {
+    for (const blockedName of ['summarizeRevenue', 'commerce_summarize_revenue']) {
+      const h = harness({ policy: { blockedTools: [blockedName] } });
+      const results = await h.service.executeApprovedPlan('cmd_1', plan('summarizeRevenue', 'commerce'), 'biz_1', 'user_1');
+      expectNothingRan(h);
+      expect(results[0].error).toContain(`Tool "${blockedName}" is blocked`);
+    }
   });
 
   it('fails closed when the business policy cannot be read', async () => {
@@ -536,7 +510,7 @@ describe("SEC-V109-2 'ask' honours the business's module and tool blocks on dott
 
     const results = await h.service.executeApprovedPlan('cmd_1', plan('summarizeRevenue', 'commerce'), 'biz_1', 'user_1');
 
-    expect(h.legacy.execute).toHaveBeenCalledTimes(1);
+    expect(h.canonical.execute).toHaveBeenCalledTimes(1);
     expect(results[0]).toMatchObject({ success: true });
   });
 });
@@ -551,15 +525,18 @@ describe('SEC-V109-3 the Activity ledger says what the KeyCommand row says, and 
     const event = lastLedgerEvent(h.timeline);
     expect(event).toMatchObject({ action: 'command.refused', status: 'CANCELLED', actorId: 'user_1', entityId: 'cmd_1' });
     expect(event.title).not.toMatch(/failed/i);
-    expect(event.data.results[0]).toMatchObject({ tool: 'commerce.summarizeRevenue', success: false, notExecuted: true });
+    expect(event.data.results[0]).toMatchObject({ tool: 'commerce_summarize_revenue', success: false, notExecuted: true });
     expect(event.data.requestedBy).toBe('user_1');
   });
 
-  it("an approval-required ask ('scan drive') is recorded as awaiting approval", async () => {
-    const h = harness({ rawInput: 'scan drive' });
-    const planned = await h.service.planActions('cmd_1', await h.service.interpretIntent('cmd_1'));
+  it("an approval-required canonical write step is recorded as awaiting approval", async () => {
+    const h = harness();
+    const approvalPlan: KeyCommandPlan = {
+      summary: 'create invoice',
+      steps: [{ tool: 'commerce_create_invoice', module: 'flow', input: {}, riskTier: 'MEDIUM', requiresApproval: true }],
+    };
 
-    await h.service.executeApprovedPlan('cmd_1', planned, 'biz_1', 'user_1');
+    await h.service.executeApprovedPlan('cmd_1', approvalPlan, 'biz_1', 'user_1');
 
     expect(lastStatus(h.prisma)).toBe('PLANNED');
     expect(lastLedgerEvent(h.timeline)).toMatchObject({ action: 'command.awaiting_approval', status: 'PENDING' });
@@ -584,7 +561,7 @@ describe('SEC-V109-3 the Activity ledger says what the KeyCommand row says, and 
   });
 
   it('a read that ran and failed is recorded as failed', async () => {
-    const h = harness({ legacyResult: { success: false, error: 'boom' } });
+    const h = harness({ canonicalResult: { success: false, error: 'boom' } });
 
     await h.service.executeApprovedPlan('cmd_1', plan('summarizeRevenue', 'commerce'), 'biz_1', 'user_1');
 
@@ -605,5 +582,57 @@ describe('CR-V109-1 advisory mode refuses ask reads (ruling: oversight governs r
     expect(results[0]).toMatchObject({ success: false, notExecuted: true });
     expect(results[0].error).toMatch(/advisory mode/);
     expect(lastStatus(h.prisma)).toBe('REJECTED');
+  });
+});
+
+describe('P154/P160: blockedModules on SAME/ALIAS canonical-routed tools and unknown legacy keys', () => {
+  const ALIASED_FINANCE: Array<[string, string, string]> = [
+    ['finance', 'summarizeCashPosition', 'finance_safe_to_spend'],
+    ['finance', 'calculateSafeToSpend', 'finance_safe_to_spend'],
+    ['finance', 'listOverdueInvoices', 'finance_list_overdue_invoices'],
+    ['finance', 'generateMoneyMoves', 'finance_money_moves'],
+    ['finance', 'cashflowForecast', 'finance_cashflow_forecast'],
+  ];
+
+  it.each(ALIASED_FINANCE)(
+    'blocks %s.%s (-> %s) when blockedModules holds "finance" or "revenue" (case-insensitive)',
+    async (module, tool, canonicalName) => {
+      for (const blocked of ['finance', 'revenue', 'FINANCE']) {
+        const h = harness({ policy: { blockedModules: [blocked] } });
+        const results = await h.service.executeApprovedPlan('cmd_blk', plan(tool, module), 'biz_1', 'user_1');
+        expectNothingRan(h);
+        expect(results[0]).toMatchObject({ success: false, notExecuted: true, tool: canonicalName });
+        expect(results[0].error).toMatch(/Module "(finance|revenue)" is blocked by business settings/i);
+      }
+    },
+  );
+
+  it('refuses an aliased finance tool when business autonomy policy is degraded or throws', async () => {
+    const degraded = harness({ policy: { degraded: true } });
+    const res1 = await degraded.service.executeApprovedPlan('cmd_deg', plan('summarizeCashPosition', 'finance'), 'biz_1', 'user_1');
+    expectNothingRan(degraded);
+    expect(res1[0]).toMatchObject({ success: false, notExecuted: true, tool: 'finance_safe_to_spend' });
+
+    const thrown = harness({ policyRead: new Error('db down') });
+    const res2 = await thrown.service.executeApprovedPlan('cmd_err', plan('summarizeCashPosition', 'finance'), 'biz_1', 'user_1');
+    expectNothingRan(thrown);
+    expect(res2[0]).toMatchObject({ success: false, notExecuted: true, tool: 'finance_safe_to_spend' });
+  });
+
+  it('allows an aliased finance tool when an unrelated module is blocked (control)', async () => {
+    const h = harness({ policy: { blockedModules: ['bookings', 'marketing'] } });
+    const results = await h.service.executeApprovedPlan('cmd_ok', plan('summarizeCashPosition', 'finance'), 'biz_1', 'user_1');
+    expect(h.canonical.execute).toHaveBeenCalledTimes(1);
+    expect(h.canonical.execute.mock.calls[0][0]).toBe('finance_safe_to_spend');
+    expect(results[0]).toMatchObject({ success: true, tool: 'finance_safe_to_spend' });
+  });
+
+  it('returns undefined for an unknown legacy key and fails closed in executeApprovedPlan', async () => {
+    expect(getLegacyToolEquivalence('unknown.nonexistentTool')).toBeUndefined();
+    const h = harness();
+    const results = await h.service.executeApprovedPlan('cmd_unk', plan('nonexistentTool', 'unknown'), 'biz_1', 'user_1');
+    expectNothingRan(h);
+    expect(results[0]).toMatchObject({ success: false, notExecuted: true, tool: 'unknown.nonexistentTool' });
+    expect(results[0].error).toMatch(/not registered/i);
   });
 });

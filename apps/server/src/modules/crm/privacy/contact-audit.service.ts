@@ -246,7 +246,7 @@ export class ContactAuditService {
       where: params.actorId
         ? { ...where, actor: { path: ['id'], equals: params.actorId } }
         : where,
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: limit + 1,
       ...(params.cursor ? { cursor: { id: params.cursor }, skip: 1 } : {}),
     });

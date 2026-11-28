@@ -479,6 +479,7 @@ test.describe("journey B: set up what I sell", () => {
       await field(form, /^name/i).fill(renamed);
       await field(form, /^price/i).fill("27");
       await form.getByRole("button", { name: /^(save|update)/i }).click();
+      await expect(form, "the edit is saved (the form closes) before the owner moves on").toBeHidden({ timeout: 30_000 });
     });
 
     await test.step("after one reload the new name and price show in the line picker and on /book/<slug>", async () => {

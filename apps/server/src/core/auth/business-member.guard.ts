@@ -1,6 +1,7 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { resolveRequestBusinessId } from './request-business-id';
+import { securitySignals } from '../observability/security-signals';
 
 /**
  * PR195-KEY-GATES (review finding SEC-P195BW-7; owner ruling D-46: "a platform SUPER_ADMIN who is not a member writes
@@ -27,7 +28,10 @@ export class BusinessMemberGuard implements CanActivate {
       where: { userId_businessId: { userId, businessId } },
       select: { id: true },
     });
-    if (!membership) throw new ForbiddenException('No access to this business');
+    if (!membership) {
+      securitySignals.record('cross_business_refusal', 'business_member_guard');
+      throw new ForbiddenException('No access to this business');
+    }
     return true;
   }
 }

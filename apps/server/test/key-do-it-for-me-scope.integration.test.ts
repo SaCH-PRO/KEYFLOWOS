@@ -235,7 +235,7 @@ beforeAll(async () => {
         provide: KeyCommandService,
         // No 'ask' runs here: the registries, oversight and the kill switch are not reached.
         useFactory: (prisma: any, commands: any) =>
-          new KeyCommandService(prisma, recorder as any, undefined, commands, undefined, undefined, undefined),
+          new KeyCommandService(prisma, recorder as any, commands, undefined, undefined, undefined),
         inject: [PrismaService, CommandService],
       },
     ],
@@ -272,7 +272,7 @@ beforeAll(async () => {
   await db.membership.create({
     data: {
       id: `${P}m_staff`, userId: ID.staff, businessId: ID.biz, role: 'STAFF',
-      permissionScopes: { crm: 'read', crm_view: 'owned', revenue: 'none', bookings: 'read', operations: 'read' },
+      permissionScopes: { crm: 'read', crm_view: 'owned', revenue: 'none', bookings: 'read', operations: 'read', ai: 'write' },
     },
   });
   // CR-V109b-1: ownerId set and no membership row, as legacy businesses were created.
@@ -330,7 +330,7 @@ beforeAll(async () => {
   await db.membership.create({
     data: {
       id: `${P}m_staffTen`, userId: ID.staffTen, businessId: ID.bizTen, role: 'STAFF',
-      permissionScopes: { crm: 'read', revenue: 'read', bookings: 'read', operations: 'write' },
+      permissionScopes: { crm: 'read', revenue: 'read', bookings: 'read', operations: 'write', ai: 'write' },
     },
   });
   const [liveFirst, liveLast] = LIVE_NAME.split(' ');

@@ -628,7 +628,7 @@ export class CrmDealsService {
     const [items, total] = await Promise.all([
       this.prisma.client.deal.findMany({
         where,
-        orderBy: [{ updatedAt: 'desc' }],
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
         skip,
         take,
         include: {

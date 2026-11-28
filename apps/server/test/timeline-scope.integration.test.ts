@@ -1149,7 +1149,18 @@ describe('W10-ADVISOR-TIMELINE (D-63): the AI advisor chat reads only the timeli
       expect(admin.prompt).toContain(`Contacts: ${adminContacts} total`);
       expect(typeof admin.body.context?.momentumScore).toBe('number');
 
-      // crm 'none', revenue read (bookings, expenses, ai absent: none): the money rows and revenue
+      // SWP-CENSUS-KEY-A (V1-64): POST ai/chat requires ai:write; grant ai:write to these STAFF fixtures
+      // for this test only (restored in finally) while keeping their crm/revenue/bookings scopes intact.
+      await db.membership.update({
+        where: { userId_businessId: { userId: ID.staffCrmNone, businessId: ID.bizA } },
+        data: { permissionScopes: { crm: 'none', revenue: 'read', ai: 'write' } },
+      });
+      await db.membership.update({
+        where: { userId_businessId: { userId: ID.staffRevNone, businessId: ID.bizA } },
+        data: { permissionScopes: { crm: 'read', revenue: 'none', bookings: 'read', operations: 'read', ai: 'write' } },
+      });
+
+      // crm 'none', revenue read (bookings, expenses absent: none): the money rows and revenue
       // figures only; no row naming a contact, no contact count, no bookings, expenses or momentum.
       const crmNone = await chat(ID.staffCrmNone);
       expect(crmNone.status, JSON.stringify(crmNone.body).slice(0, 300)).toBe(201);
@@ -1181,6 +1192,14 @@ describe('W10-ADVISOR-TIMELINE (D-63): the AI advisor chat reads only the timeli
       expect((await chat(ID.ownerB)).status).toBe(403);
       expect(chatCalls.slice(before)).toEqual([]);
     } finally {
+      await db.membership.update({
+        where: { userId_businessId: { userId: ID.staffCrmNone, businessId: ID.bizA } },
+        data: { permissionScopes: { crm: 'none', revenue: 'read' } },
+      });
+      await db.membership.update({
+        where: { userId_businessId: { userId: ID.staffRevNone, businessId: ID.bizA } },
+        data: { permissionScopes: { crm: 'read', revenue: 'none', bookings: 'read', operations: 'read' } },
+      });
       await db.$executeRawUnsafe(`DELETE FROM activities WHERE id LIKE ${sqlLikePrefix(`${P}chat_`)}`);
       // Raw SQL: Invoice and Expense are soft-deleted models (fixture-cleanup-integrity.spec.ts).
       await db.$executeRawUnsafe(`DELETE FROM invoices WHERE id LIKE ${sqlLikePrefix(`${P}inv_chat_`)}`);
@@ -1549,6 +1568,17 @@ describe('W11-AI-SIMULATE-VIEWER (D-63, D-100): the AI simulation reads only wha
       await advisor.simulateScenario(ID.bizA, SCENARIO, VARIABLES);
       expect(owner.prompt, "OWNER: the business's whole prompt").toBe(simCalls.slice(from).map((c) => c.text).join('\n'));
 
+      // SWP-CENSUS-KEY-A (V1-64): POST ai/simulate requires ai:write; grant ai:write to these STAFF fixtures
+      // for this test only (restored in finally) while keeping their crm/revenue/bookings scopes intact.
+      await db.membership.update({
+        where: { userId_businessId: { userId: ID.staffRevNone, businessId: ID.bizA } },
+        data: { permissionScopes: { crm: 'read', revenue: 'none', bookings: 'read', operations: 'read', ai: 'write' } },
+      });
+      await db.membership.update({
+        where: { userId_businessId: { userId: ID.staffOwned, businessId: ID.bizA } },
+        data: { permissionScopes: { crm: 'read', crm_view: 'owned', revenue: 'read', ai: 'write' } },
+      });
+
       // revenue 'none' (crm, bookings, operations read): no revenue figure, no PRIVATE contact, no row naming it.
       const revNone = await simulate(ID.staffRevNone);
       expect(revNone.status, JSON.stringify(revNone.body).slice(0, 300)).toBe(201);
@@ -1594,6 +1624,14 @@ describe('W11-AI-SIMULATE-VIEWER (D-63, D-100): the AI simulation reads only wha
       expect((await simulate(ID.ownerB)).status).toBe(403);
       expect(simCalls.slice(before)).toEqual([]);
     } finally {
+      await db.membership.update({
+        where: { userId_businessId: { userId: ID.staffRevNone, businessId: ID.bizA } },
+        data: { permissionScopes: { crm: 'read', revenue: 'none', bookings: 'read', operations: 'read' } },
+      });
+      await db.membership.update({
+        where: { userId_businessId: { userId: ID.staffOwned, businessId: ID.bizA } },
+        data: { permissionScopes: { crm: 'read', crm_view: 'owned', revenue: 'read' } },
+      });
       await db.$executeRawUnsafe(`DELETE FROM activities WHERE id LIKE ${sqlLikePrefix(`${P}sim_`)}`);
       // Raw SQL: Invoice is a soft-deleted model (fixture-cleanup-integrity.spec.ts).
       await db.$executeRawUnsafe(`DELETE FROM invoices WHERE id LIKE ${sqlLikePrefix(`${P}inv_sim_`)}`);
@@ -2746,7 +2784,18 @@ describe('W7-BRIEFINGS-REST (D-63, D-73): the advisor, weekly and revenue-intell
       await seed('briefB', ID.bizB, ID.ownerB, true);
       await seed('staffs', ID.bizA, ID.staffDefault, true);
 
-      // STAFF on role defaults (ai 'none'): not the OWNER's other plan, not the OWNER's briefing.
+      // SWP-CENSUS-KEY-A (V1-64): default STAFF (ai:none) is refused 403 at ModuleScopeGuard before reaching skipBriefing.
+      expect((await skip('staffs', ID.staffDefault)).status).toBe(403);
+      expect(await state('staffs')).toEqual(untouched(ID.staffDefault));
+
+      // Grant ai:write for the inner ownership checks (restored to null in finally).
+      const { defaultScopesForRole } = await import('../src/core/authority/module-vocabulary');
+      await db.membership.update({
+        where: { userId_businessId: { userId: ID.staffDefault, businessId: ID.bizA } },
+        data: { permissionScopes: { ...defaultScopesForRole('STAFF'), ai: 'write' } },
+      });
+
+      // STAFF with ai:write: still not the OWNER's other plan (404), not the OWNER's briefing (403).
       const other = await skip('other', ID.staffDefault);
       expect(other.status, JSON.stringify(other.body).slice(0, 200)).toBe(404);
       expect(await state('other')).toEqual(untouched(ID.owner));
@@ -2769,6 +2818,10 @@ describe('W7-BRIEFINGS-REST (D-63, D-73): the advisor, weekly and revenue-intell
       expect(ownerSkip.status, JSON.stringify(ownerSkip.body).slice(0, 200)).toBe(201);
       expect(await state('brief')).toEqual(skipped(ID.owner));
     } finally {
+      await db.membership.update({
+        where: { userId_businessId: { userId: ID.staffDefault, businessId: ID.bizA } },
+        data: { permissionScopes: null },
+      });
       await db.$executeRawUnsafe(`DELETE FROM ai_execution_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`);
       await db.$executeRawUnsafe(`DELETE FROM ai_plans WHERE id LIKE ${sqlLikePrefix(`${P}plan_`)}`);
     }

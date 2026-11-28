@@ -30,12 +30,14 @@
  * an obligation is safe to do twice, which is most of the argument for raising
  * obligations rather than writing rows directly.
  */
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { WORK_OBLIGATION_RAISED, type ObligationRaisedPayload } from '@keyflow/shared';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { schedulersDisabled } from '../../core/config/env';
+import { RedisService } from '../../core/redis/redis.service';
+import { claimOccurrence, utcDateSlot } from '../../core/scheduling/occurrence-claim';
 
 /**
  * Used when a contract has no `renewalNoticeDays`. 30 is the extractor's own
@@ -54,6 +56,7 @@ export class ContractRenewalSweep {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
+    @Optional() @Inject(RedisService) private readonly redis?: RedisService,
   ) {}
 
   /**
@@ -66,6 +69,7 @@ export class ContractRenewalSweep {
   // ENABLE_SCHEDULERS_IN_TEST); the work below stays callable directly.
   async scheduledSweep(): Promise<void> {
     if (schedulersDisabled()) return;
+    if (!(await claimOccurrence(this.redis, 'contract-renewal', utcDateSlot(), 23 * 60 * 60 * 1000))) return;
     await this.sweep();
   }
 

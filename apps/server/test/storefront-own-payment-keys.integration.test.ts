@@ -899,6 +899,10 @@ beforeAll(async () => {
       data: { id, name: `V61B ${slug}`, slug, ownerId: ID.owner, currency: 'USD', accountingBasis: 'CASH', storeEnabled: true },
     });
     await db.membership.create({ data: { id: `${id}_m_owner`, userId: ID.owner, businessId: id, role: 'OWNER' } });
+    // P233 WEDGE-HIDE-STORE-SERVER: this suite tests public store checkout on businesses that already sell online.
+    await db.marketplaceOrder.create({
+      data: { id: `${id}_legacy_seed`, businessId: id, orderNumber: `${id.toUpperCase()}-LEGACY-0`, status: 'completed', customerName: 'Legacy Seed', total: 1, subtotal: 1, currency: 'USD' },
+    });
     await app.get(ChartOfAccountsSeederService).ensureDefaults(id);
   }
   for (const [id, businessId] of [

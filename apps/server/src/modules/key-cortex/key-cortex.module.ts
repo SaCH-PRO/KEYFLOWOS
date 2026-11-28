@@ -529,7 +529,7 @@ import { CapabilitiesModule } from '../capabilities/capabilities.module';
     KeyCortexFlowStudioService,
 
 
-    // Self-Evolution -- adaptive learning, pattern detection & auto-tuning
+    // Self-Evolution -- adaptive learning & pattern detection
     KeyCortexEvolutionService,
 
     // Phone Agent -- voice calls, scripts, transcripts & analysis

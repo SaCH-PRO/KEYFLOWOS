@@ -1,0 +1,533 @@
+/**
+ * WEDGE-HIDE-STORE part 2 (P225, D-263; owner question 72 open): on /book/<slug> the store checkout is offered only
+ * when GET /site/storefront/public/<slug> answers `storeCheckout: true` (server row P233).
+ *
+ * WHY this test exists: D-263 does not offer the store checkout to a new business at launch; a business already
+ * selling keeps it. The answer is the server's. Anything but `true` (a missing field, false, a failed read) means
+ * not offered. WHS2-10 pins the consequence on purpose: against a server WITHOUT the field every business reads
+ * "not offered", so this web half may only ship with or after P233.
+ *
+ * Whether a product is LISTED is not decided here (owner question 72): these tests pin only that it cannot be put
+ * in the cart, that a restored cart loses its product lines, and that no store order is submitted. Bookings are
+ * untouched: a service keeps its Add button and its cart line.
+ *
+ * Mounted on the real page; only lib/api's apiGet/apiPost (the HTTP edge) and the router are stubbed.
+ */
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
+import React from "react";
+import { render, screen, cleanup, fireEvent, waitFor, within, act } from "@testing-library/react";
+
+const api = vi.hoisted(() => ({ apiGet: vi.fn(), apiPost: vi.fn() }));
+
+vi.mock("@/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api")>();
+  return { ...actual, apiGet: api.apiGet, apiPost: api.apiPost };
+});
+
+vi.mock("next/navigation", () => ({
+  useParams: () => ({ slug: SLUG }),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn(), prefetch: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(""),
+  usePathname: () => `/book/${SLUG}`,
+}));
+
+import PublicBookingPage from "../page";
+
+const SLUG = "whs2-shop";
+const BUSINESS = { id: "biz_whs2_1", name: "WHS2 Studio", slug: SLUG, currency: "TTD", timezone: "America/Port_of_Spain", storeEnabled: true };
+const PRODUCT = {
+  id: "prod_whs2_pepper", name: "Pepper sauce", description: null, price: 35, currency: "TTD", category: "PRODUCT", imageUrl: null,
+  isActive: true, availableQuantity: null, stockStatus: "untracked", purchasable: true,
+};
+const SERVICE = { id: "svc_whs2_cut", name: "Haircut", description: null, duration: 30, price: 120 };
+const PRODUCT_LINE = { id: PRODUCT.id, name: PRODUCT.name, description: null, price: 35, currency: "TTD", duration: null, imageUrl: null, itemType: "product", requiresBooking: false, quantity: 2 };
+const SERVICE_LINE = { id: SERVICE.id, name: SERVICE.name, description: null, price: 120, currency: "TTD", duration: 30, imageUrl: null, itemType: "service", requiresBooking: true, sourceServiceId: SERVICE.id, quantity: 1 };
+const CART_KEY = `kf_cart_${SLUG}`;
+const ORDER_PAYLOAD = { items: [{ productId: PRODUCT.id, quantity: 1 }], customer: { name: "Ana Ali", email: "ana@whs2.test" }, paymentMethod: "WIPAY" };
+
+/** What GET /site/storefront/public/<slug> answers in a test: an object, or "fails" for a failed read. */
+let storefront: Record<string, unknown> | "fails" = { storefront: {} };
+let services: unknown[] = [];
+let products: unknown[] = [];
+/** What the order status read answers for a kept order (FAILED: the Payment Failed view; PENDING: the pending view). */
+let paymentStatus = "FAILED";
+
+const ADD = /^(add|pre-order|add to cart)$/i;
+const storedCart = (): Array<{ id: string }> => JSON.parse(window.localStorage.getItem(CART_KEY) ?? "[]");
+/**
+ * Gives the page a bounded window of real time (50 ms, inside act) to finish what the last update started: its
+ * commit, the passive effects after it (the stored cart is rewritten in one), and anything those put on a timer. A
+ * "nothing was deleted" check is only worth anything after this window, never inside the waitFor that saw the update,
+ * which passes on the first commit, and never after a single microtask, which a deferred deletion outlives.
+ */
+const settle = () => act(() => new Promise<void>((r) => setTimeout(r, 50)));
+/** The stored cart as written: null when the page never wrote one, "[]" when it wrote an empty cart. */
+const storedCartRaw = (): string | null => window.localStorage.getItem(CART_KEY);
+const checkoutPosts = () => api.apiPost.mock.calls.filter(([arg]) => String((arg as { path?: string })?.path ?? "").endsWith("/checkout"));
+
+beforeAll(() => {
+  class NoopObserver {
+    observe() {}
+    disconnect() {}
+    unobserve() {}
+    takeRecords() { return []; }
+  }
+  vi.stubGlobal("IntersectionObserver", NoopObserver);
+});
+
+beforeEach(() => {
+  window.localStorage.clear();
+  storefront = { storefront: {} };
+  paymentStatus = "FAILED";
+  services = [];
+  products = [];
+  api.apiPost.mockReset();
+  api.apiPost.mockImplementation(async () => ({ data: null, error: null }));
+  api.apiGet.mockReset();
+  api.apiGet.mockImplementation(async (path: string) => {
+    if (path === `/identity/businesses/slug/${SLUG}`) return { data: BUSINESS, error: null };
+    if (path === `/site/storefront/public/${SLUG}`) return storefront === "fails" ? { data: null, error: "Request failed" } : { data: storefront, error: null };
+    if (path.startsWith("/site/storefront/public/order/")) return { data: { paymentStatus, status: "PENDING" }, error: null };
+    if (path === `/bookings/public/businesses/${BUSINESS.id}/services`) return { data: services, error: null };
+    if (path === `/bookings/public/businesses/${BUSINESS.id}/staff`) return { data: [], error: null };
+    if (path === `/commerce/public/businesses/${BUSINESS.id}/products`) return { data: products, error: null };
+    return { data: null, error: null };
+  });
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+});
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+const NOT_OFFERED: Array<[string, Record<string, unknown> | "fails"]> = [
+  ["the field is missing (a server without P233)", { storefront: {} }],
+  ["storeCheckout is false", { storefront: {}, storeCheckout: false }],
+  ["storeCheckout is a truthy non-boolean", { storefront: {}, storeCheckout: "true" }],
+];
+const KEPT_ORDER = {
+  orderId: "ord_whs2_1", orderNumber: "ORD-1001", customerEmail: "ana@whs2.test", items: [PRODUCT_LINE], orderTotal: 70,
+  paymentMethod: "wipay", orderPayload: ORDER_PAYLOAD,
+};
+const COULD_NOT_CHECK = /couldn.t check online ordering/i;
+
+describe("WEDGE-HIDE-STORE part 2: /book/<slug> offers the store checkout only on storeCheckout: true", () => {
+  it("WHS2-03 storeCheckout true: a product can be added to the cart", async () => {
+    storefront = { storefront: {}, storeCheckout: true };
+    products = [PRODUCT];
+    render(<PublicBookingPage />);
+    await screen.findAllByText(PRODUCT.name, { exact: true });
+    fireEvent.click(screen.getAllByRole("button", { name: ADD })[0]);
+    await waitFor(() => expect(storedCart().map((c) => c.id)).toEqual([PRODUCT.id]));
+  });
+
+  for (const [label, answer] of NOT_OFFERED) {
+    it(`WHS2-04 not offered when ${label}: no product can be added to the cart`, async () => {
+      storefront = answer;
+      products = [PRODUCT];
+      services = [SERVICE];
+      render(<PublicBookingPage />);
+      await screen.findAllByText(SERVICE.name, { exact: true });
+      // The only Add buttons left are the service's: pressing every one puts no product in the cart.
+      for (const button of screen.queryAllByRole("button", { name: ADD })) fireEvent.click(button);
+      await waitFor(() => {
+        expect(storedCart().map((c) => c.id)).toEqual([SERVICE.id]);
+        expect(screen.queryAllByRole("button", { name: /sold out/i })).toHaveLength(0);
+      });
+    });
+
+    it(`WHS2-05 not offered when ${label}: a restored cart loses its product lines and keeps its service lines`, async () => {
+      storefront = answer;
+      products = [PRODUCT];
+      services = [SERVICE];
+      window.localStorage.setItem(CART_KEY, JSON.stringify([PRODUCT_LINE, SERVICE_LINE]));
+      render(<PublicBookingPage />);
+      await screen.findAllByText(SERVICE.name, { exact: true });
+      await waitFor(() => expect(storedCart().map((c) => c.id)).toEqual([SERVICE.id]));
+      // The cart counts and totals the booking line only (2 x 35 + 120 = 190 with the product lines).
+      fireEvent.click(await screen.findByRole("button", { name: "Open cart with 1 items" }));
+      const drawer = await screen.findByRole("dialog", { name: "Shopping cart" });
+      expect(within(drawer).getAllByText(SERVICE.name).length).toBeGreaterThan(0);
+      expect(within(drawer).queryByText(PRODUCT.name)).toBeNull();
+      expect(drawer.textContent).toMatch(/120\.00/);
+      expect(drawer.textContent).not.toMatch(/190\.00|70\.00/);
+    });
+
+    it(`WHS2-15 not offered when ${label}: a stored line with no requiresBooking (an older cart) is dropped as a store line`, async () => {
+      storefront = answer;
+      services = [SERVICE];
+      const { requiresBooking: _dropped, ...legacyLine } = PRODUCT_LINE;
+      window.localStorage.setItem(CART_KEY, JSON.stringify([legacyLine, SERVICE_LINE]));
+      render(<PublicBookingPage />);
+      await screen.findAllByText(SERVICE.name, { exact: true });
+      await waitFor(() => expect(storedCart().map((c) => c.id)).toEqual([SERVICE.id]));
+      expect(await screen.findByRole("button", { name: "Open cart with 1 items" })).toBeTruthy();
+    });
+
+    it(`WHS2-16 not offered when ${label}: the wishlist offers no Add to Cart, and Find Your Match is not drawn`, async () => {
+      storefront = answer;
+      products = [PRODUCT];
+      services = [SERVICE];
+      window.localStorage.setItem(`kf_wishlist_${SLUG}`, JSON.stringify([{ id: PRODUCT.id, name: PRODUCT.name, price: 35, currency: "TTD", imageUrl: null, itemType: "product" }]));
+      render(<PublicBookingPage />);
+      await screen.findAllByText(SERVICE.name, { exact: true });
+      expect(screen.queryByRole("button", { name: /find your match/i })).toBeNull();
+      fireEvent.click(screen.getByTitle("Wishlist"));
+      await waitFor(() => expect(screen.getAllByText(PRODUCT.name).length).toBeGreaterThan(1));
+      expect(screen.queryByRole("button", { name: /add to cart/i })).toBeNull();
+    });
+
+    it(`WHS2-06 not offered when ${label}: a kept failed order offers no retry, says why, and is not submitted`, async () => {
+      storefront = answer;
+      window.localStorage.setItem(`kf_pending_checkout_${SLUG}`, JSON.stringify({
+        orderId: "ord_whs2_1", orderNumber: "ORD-1001", customerEmail: "ana@whs2.test", items: [PRODUCT_LINE], orderTotal: 70,
+        paymentMethod: "wipay", orderPayload: ORDER_PAYLOAD,
+      }));
+      render(<PublicBookingPage />);
+      expect(await screen.findByRole("heading", { name: "Payment Failed" })).toBeTruthy();
+      expect(screen.getByText("Online orders are not available from this business.")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /retry payment|try again/i })).toBeNull();
+      // It does not tell the customer to try again, or to pick another method, when neither can be done here.
+      expect(screen.queryByText(/please try again|different payment method/i)).toBeNull();
+      // The one way on is back to the page: no dead Retry to loop on.
+      fireEvent.click(screen.getByRole("button", { name: /back to shop/i }));
+      await waitFor(() => expect(screen.queryByRole("heading", { name: "Payment Failed" })).toBeNull());
+      expect(checkoutPosts()).toHaveLength(0);
+    });
+    it(`WHS2-06b not offered when ${label}: a kept order still pending offers no retry, says why, and claims nothing it does not know`, async () => {
+      storefront = answer;
+      paymentStatus = "PENDING";
+      window.localStorage.setItem(`kf_pending_checkout_${SLUG}`, JSON.stringify(KEPT_ORDER));
+      render(<PublicBookingPage />);
+      expect(await screen.findByRole("heading", { name: "Payment not confirmed" })).toBeTruthy();
+      expect(screen.getByText("Online orders are not available from this business.")).toBeTruthy();
+      expect(screen.queryByText(/still being processed|check back shortly/i)).toBeNull();
+      expect(screen.queryByRole("heading", { name: "Payment Processing" })).toBeNull();
+      expect(screen.queryByRole("button", { name: /retry payment|try again/i })).toBeNull();
+      expect(checkoutPosts()).toHaveLength(0);
+    });
+  }
+
+  it("WHS2-07 storeCheckout true: a restored cart keeps its product and service lines", async () => {
+    storefront = { storefront: {}, storeCheckout: true };
+    products = [PRODUCT];
+    services = [SERVICE];
+    window.localStorage.setItem(CART_KEY, JSON.stringify([PRODUCT_LINE, SERVICE_LINE]));
+    render(<PublicBookingPage />);
+    await screen.findAllByText(SERVICE.name, { exact: true });
+    expect(await screen.findByRole("button", { name: "Open cart with 3 items" })).toBeTruthy();
+    await settle();
+    expect(storedCart().map((c) => c.id)).toEqual([PRODUCT.id, SERVICE.id]);
+  });
+
+  it("WHS2-17 storeCheckout true: the wishlist offers Add to Cart and Find Your Match is drawn", async () => {
+    storefront = { storefront: {}, storeCheckout: true };
+    products = [PRODUCT];
+    services = [SERVICE];
+    window.localStorage.setItem(`kf_wishlist_${SLUG}`, JSON.stringify([{ id: PRODUCT.id, name: PRODUCT.name, price: 35, currency: "TTD", imageUrl: null, itemType: "product" }]));
+    render(<PublicBookingPage />);
+    await screen.findAllByText(SERVICE.name, { exact: true });
+    expect(screen.getByRole("button", { name: /find your match/i })).toBeTruthy();
+    fireEvent.click(screen.getByTitle("Wishlist"));
+    fireEvent.click(await screen.findByRole("button", { name: /add to cart/i }));
+    await waitFor(() => expect(storedCart().map((c) => c.id)).toEqual([PRODUCT.id]));
+  });
+
+  it("WHS2-08 storeCheckout true: a kept failed order is submitted again on Retry", async () => {
+    storefront = { storefront: {}, storeCheckout: true };
+    window.localStorage.setItem(`kf_pending_checkout_${SLUG}`, JSON.stringify({
+      orderId: "ord_whs2_1", orderNumber: "ORD-1001", customerEmail: "ana@whs2.test", items: [PRODUCT_LINE], orderTotal: 70,
+      paymentMethod: "wipay", orderPayload: ORDER_PAYLOAD,
+    }));
+    render(<PublicBookingPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /retry payment|try again/i }));
+    await waitFor(() => expect(checkoutPosts()).toHaveLength(1));
+  });
+
+  it("WHS2-08b storeCheckout true: a kept order still pending keeps its own words and its Retry", async () => {
+    storefront = { storefront: {}, storeCheckout: true };
+    paymentStatus = "PENDING";
+    window.localStorage.setItem(`kf_pending_checkout_${SLUG}`, JSON.stringify(KEPT_ORDER));
+    render(<PublicBookingPage />);
+    expect(await screen.findByRole("heading", { name: "Payment Processing" })).toBeTruthy();
+    expect(screen.getByText(/still being processed/i)).toBeTruthy();
+    expect(screen.queryByText("Online orders are not available from this business.")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /retry payment/i }));
+    await waitFor(() => expect(checkoutPosts()).toHaveLength(1));
+  });
+
+  it("WHS2-08c storeCheckout true: the Payment Failed view keeps its try-again words", async () => {
+    storefront = { storefront: {}, storeCheckout: true };
+    window.localStorage.setItem(`kf_pending_checkout_${SLUG}`, JSON.stringify(KEPT_ORDER));
+    render(<PublicBookingPage />);
+    expect(await screen.findByRole("heading", { name: "Payment Failed" })).toBeTruthy();
+    expect(screen.getByText(/please try again or choose a different payment method/i)).toBeTruthy();
+  });
+
+  // Repair round 3, item 5: a storefront read that FAILED is not the answer "not offered". The gate stays closed, but
+  // nothing is deleted, and the customer can ask again.
+  it("WHS2-25 the storefront read failed: gate closed, stored cart kept, a notice with Try again; a retry that answers true gives the cart back", async () => {
+    storefront = "fails";
+    products = [PRODUCT];
+    services = [SERVICE];
+    window.localStorage.setItem(CART_KEY, JSON.stringify([PRODUCT_LINE, SERVICE_LINE]));
+    render(<PublicBookingPage />);
+    await screen.findAllByText(SERVICE.name, { exact: true });
+    expect(await screen.findByRole("button", { name: "Open cart with 1 items" })).toBeTruthy();
+    expect(screen.getByText(COULD_NOT_CHECK)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /find your match/i })).toBeNull();
+    // The only Add buttons are the service's (already in the cart: none adds a product).
+    for (const button of screen.queryAllByRole("button", { name: ADD })) fireEvent.click(button);
+    await new Promise((r) => setTimeout(r, 50));
+    // Nothing was deleted: the product line is still stored.
+    expect(storedCart().map((c) => c.id)).toEqual([PRODUCT.id, SERVICE.id]);
+
+    storefront = { storefront: {}, storeCheckout: true };
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("button", { name: "Open cart with 3 items" })).toBeTruthy();
+    await settle();
+    expect(screen.queryByText(COULD_NOT_CHECK)).toBeNull();
+    expect(storedCart().map((c) => c.id)).toEqual([PRODUCT.id, SERVICE.id]);
+  });
+
+  it("WHS2-26 the storefront read failed, then a retry answers false: only then are the stored product lines dropped", async () => {
+    storefront = "fails";
+    products = [PRODUCT];
+    services = [SERVICE];
+    window.localStorage.setItem(CART_KEY, JSON.stringify([PRODUCT_LINE, SERVICE_LINE]));
+    render(<PublicBookingPage />);
+    expect(await screen.findByText(COULD_NOT_CHECK)).toBeTruthy();
+    await settle();
+    expect(storedCart().map((c) => c.id)).toEqual([PRODUCT.id, SERVICE.id]);
+
+    storefront = { storefront: {}, storeCheckout: false };
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => {
+      expect(storedCart().map((c) => c.id)).toEqual([SERVICE.id]);
+      expect(screen.queryByText(COULD_NOT_CHECK)).toBeNull();
+      expect(screen.getByRole("button", { name: "Open cart with 1 items" })).toBeTruthy();
+    });
+  });
+
+  it("WHS2-27 the storefront read failed, and failed again on retry: the notice stays and nothing is deleted", async () => {
+    storefront = "fails";
+    products = [PRODUCT];
+    services = [SERVICE];
+    window.localStorage.setItem(CART_KEY, JSON.stringify([PRODUCT_LINE, SERVICE_LINE]));
+    render(<PublicBookingPage />);
+    const reads = () => api.apiGet.mock.calls.filter(([path]) => path === `/site/storefront/public/${SLUG}`).length;
+    fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
+    // The signal: the second read was made and has answered (Try again is enabled again).
+    await waitFor(() => {
+      expect(reads()).toBe(2);
+      expect((screen.getByRole("button", { name: "Try again" }) as HTMLButtonElement).disabled).toBe(false);
+    });
+    // Then let the effects of that answer run, and only then look: the notice and the stored lines are still there.
+    await settle();
+    expect(screen.getByText(COULD_NOT_CHECK)).toBeTruthy();
+    // Still enabled after the window: Try again is not left dead by something that disables it late.
+    expect((screen.getByRole("button", { name: "Try again" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(storedCart().map((c) => c.id)).toEqual([PRODUCT.id, SERVICE.id]);
+    expect(screen.getByRole("button", { name: "Open cart with 1 items" })).toBeTruthy();
+  });
+
+  it("WHS2-28 the storefront read failed: a kept failed order sends no store order, and promises no retry that is not there", async () => {
+    storefront = "fails";
+    window.localStorage.setItem(`kf_pending_checkout_${SLUG}`, JSON.stringify(KEPT_ORDER));
+    render(<PublicBookingPage />);
+    expect(await screen.findByRole("heading", { name: "Payment Failed" })).toBeTruthy();
+    expect(screen.getByText("Couldn't check online ordering, so this payment can't be tried again here. Please contact the business.")).toBeTruthy();
+    expect(screen.queryByText(/right now/i)).toBeNull();
+    expect(screen.queryByText("Online orders are not available from this business.")).toBeNull();
+    expect(screen.queryByText(/go back|please try again|different payment method/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: /retry payment|try again/i })).toBeNull();
+    expect(checkoutPosts()).toHaveLength(0);
+  });
+
+  it("WHS2-37 the storefront read failed: a kept order still pending says to contact the business, and nothing about trying again", async () => {
+    storefront = "fails";
+    paymentStatus = "PENDING";
+    window.localStorage.setItem(`kf_pending_checkout_${SLUG}`, JSON.stringify(KEPT_ORDER));
+    render(<PublicBookingPage />);
+    expect(await screen.findByRole("heading", { name: "Payment not confirmed" })).toBeTruthy();
+    expect(screen.getByText("We could not confirm this payment. Please contact the business about this order.")).toBeTruthy();
+    expect(screen.getByText("Couldn't check online ordering.")).toBeTruthy();
+    expect(screen.queryByText(/go back|try again|still being processed/i)).toBeNull();
+    expect(screen.queryByText("Online orders are not available from this business.")).toBeNull();
+    expect(screen.queryByRole("button", { name: /retry payment|try again/i })).toBeNull();
+    expect(checkoutPosts()).toHaveLength(0);
+  });
+
+  it("WHS2-34 the storefront read failed, a product listed, an empty cart: the notice shows, and no door sells the product (catalog, detail, wishlist)", async () => {
+    storefront = "fails";
+    products = [PRODUCT];
+    window.localStorage.setItem(`kf_wishlist_${SLUG}`, JSON.stringify([{ id: PRODUCT.id, name: PRODUCT.name, price: 35, currency: "TTD", imageUrl: null, itemType: "product" }]));
+    render(<PublicBookingPage />);
+    await screen.findAllByText(PRODUCT.name, { exact: true });
+    expect(screen.getByText(COULD_NOT_CHECK)).toBeTruthy();
+    // Catalog: the product's card has no Add (there is no service, so any Add would be the product's).
+    expect(screen.queryAllByRole("button", { name: ADD })).toHaveLength(0);
+    expect(screen.queryAllByRole("button", { name: /sold out/i })).toHaveLength(0);
+    // Detail: opened from the card, it offers no Add to Cart.
+    fireEvent.click(screen.getAllByText(PRODUCT.name, { exact: true })[0]);
+    await waitFor(() => expect(screen.getAllByText(PRODUCT.name, { exact: true }).length).toBeGreaterThan(1));
+    expect(screen.queryByRole("button", { name: /add to cart/i })).toBeNull();
+    // Wishlist: listed, with no Add to Cart.
+    fireEvent.click(screen.getByTitle("Wishlist"));
+    await waitFor(() => expect(screen.getAllByText(PRODUCT.name, { exact: true }).length).toBeGreaterThan(2));
+    expect(screen.queryByRole("button", { name: /add to cart/i })).toBeNull();
+    // No cart was ever written: nothing went in.
+    expect(storedCartRaw()).toBeNull();
+  });
+
+  it("WHS2-35 the storefront read failed, no product listed, a stored older line with no requiresBooking: not shown, not deleted, and the notice shows", async () => {
+    storefront = "fails";
+    services = [SERVICE];
+    const { requiresBooking: _dropped, ...legacyLine } = PRODUCT_LINE;
+    window.localStorage.setItem(CART_KEY, JSON.stringify([legacyLine, SERVICE_LINE]));
+    render(<PublicBookingPage />);
+    await screen.findAllByText(SERVICE.name, { exact: true });
+    expect(await screen.findByRole("button", { name: "Open cart with 1 items" })).toBeTruthy();
+    expect(screen.getByText(COULD_NOT_CHECK)).toBeTruthy();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(storedCart().map((c) => c.id)).toEqual([PRODUCT.id, SERVICE.id]);
+  });
+
+  it("WHS2-36 the storefront read failed, only an inactive product and no stored product line: no notice", async () => {
+    storefront = "fails";
+    products = [{ ...PRODUCT, isActive: false }];
+    services = [SERVICE];
+    render(<PublicBookingPage />);
+    await screen.findAllByText(SERVICE.name, { exact: true });
+    expect(screen.queryByText(COULD_NOT_CHECK)).toBeNull();
+  });
+
+  it("WHS2-38 Try again is disabled while its read is out, and enabled again when that read fails", async () => {
+    storefront = "fails";
+    products = [PRODUCT];
+    render(<PublicBookingPage />);
+    const tryAgain = await screen.findByRole("button", { name: "Try again" });
+    let release: (v: unknown) => void = () => {};
+    const held = new Promise((r) => { release = r; });
+    const reads = () => api.apiGet.mock.calls.filter(([path]) => path === `/site/storefront/public/${SLUG}`).length;
+    const before = reads();
+    const usual = api.apiGet.getMockImplementation()!;
+    api.apiGet.mockImplementation(async (path: string) => {
+      if (path === `/site/storefront/public/${SLUG}`) { await held; return { data: null, error: "Request failed" }; }
+      return usual(path);
+    });
+    try {
+      fireEvent.click(tryAgain);
+      await waitFor(() => expect((screen.getByRole("button", { name: "Try again" }) as HTMLButtonElement).disabled).toBe(true));
+      // A second press while the first read is out asks for nothing more.
+      fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+      expect(reads()).toBe(before + 1);
+    } finally {
+      release(null);
+    }
+    await waitFor(() => expect((screen.getByRole("button", { name: "Try again" }) as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.getByText(COULD_NOT_CHECK)).toBeTruthy();
+  });
+
+  // Repair round 5: an order paid at the provider held the cart's lines, the product lines too. Back on the page, the
+  // whole stored cart goes, whatever the storefront read says and even before it answers.
+  for (const [label, answer] of [
+    ["storeCheckout true", { storefront: {}, storeCheckout: true }],
+    ["storeCheckout false", { storefront: {}, storeCheckout: false }],
+    ["the storefront read failed", "fails"],
+  ] as Array<[string, Record<string, unknown> | "fails"]>) {
+    it(`WHS2-43 a paid provider return empties the whole stored cart (${label})`, async () => {
+      storefront = answer;
+      paymentStatus = "PAID";
+      window.localStorage.setItem(CART_KEY, JSON.stringify([PRODUCT_LINE, SERVICE_LINE]));
+      window.localStorage.setItem(`kf_promo_${SLUG}`, JSON.stringify({ code: "TEN", discountType: "percentage", discountValue: 10 }));
+      window.localStorage.setItem(`kf_pending_checkout_${SLUG}`, JSON.stringify(KEPT_ORDER));
+      render(<PublicBookingPage />);
+      // The confirmation of the paid order is the signal that the return was read and the page has drawn it.
+      expect(await screen.findByRole("heading", { name: "Order Placed!" })).toBeTruthy();
+      // The cart is written before React draws again, so what is drawn is waited for with it, never read straight after.
+      await waitFor(() => {
+        expect(storedCartRaw()).toBe("[]");
+        expect(window.localStorage.getItem(`kf_promo_${SLUG}`)).toBeNull();
+        expect(screen.queryByRole("heading", { name: /payment failed|payment not confirmed|payment processing/i })).toBeNull();
+        expect(screen.queryByRole("button", { name: /^Open cart with/ })).toBeNull();
+      });
+      expect(checkoutPosts()).toHaveLength(0);
+    });
+  }
+
+  it("WHS2-43b a paid provider return empties the stored cart while the storefront read is still out", async () => {
+    let release: (v: unknown) => void = () => {};
+    const held = new Promise((r) => { release = r; });
+    paymentStatus = "PAID";
+    const usual = api.apiGet.getMockImplementation()!;
+    api.apiGet.mockImplementation(async (path: string) => {
+      if (path === `/site/storefront/public/${SLUG}`) { await held; return { data: { storefront: {}, storeCheckout: true }, error: null }; }
+      return usual(path);
+    });
+    window.localStorage.setItem(CART_KEY, JSON.stringify([PRODUCT_LINE, SERVICE_LINE]));
+    window.localStorage.setItem(`kf_pending_checkout_${SLUG}`, JSON.stringify(KEPT_ORDER));
+    try {
+      render(<PublicBookingPage />);
+      // Written as an empty cart while the storefront read is held (the page still shows its loader).
+      await waitFor(() => expect(storedCartRaw()).toBe("[]"));
+      expect(screen.queryByRole("heading", { name: "Order Placed!" })).toBeNull();
+    } finally {
+      release(null);
+    }
+    // The confirmation is drawn only once the held read has answered: the signal that the page finished loading.
+    expect(await screen.findByRole("heading", { name: "Order Placed!" })).toBeTruthy();
+    await waitFor(() => {
+      expect(storedCartRaw()).toBe("[]");
+      expect(window.localStorage.getItem(`kf_pending_checkout_${SLUG}`)).toBeNull();
+      expect(screen.queryByRole("button", { name: /^Open cart with/ })).toBeNull();
+    });
+  });
+
+  it("WHS2-29 a business with no product and no stored product line shows no notice when the storefront read failed", async () => {
+    storefront = "fails";
+    services = [SERVICE];
+    render(<PublicBookingPage />);
+    await screen.findAllByText(SERVICE.name, { exact: true });
+    expect(screen.queryByText(COULD_NOT_CHECK)).toBeNull();
+  });
+
+  it("WHS2-09 while the answer is not yet known the stored cart is not rewritten; a late 'true' gives the whole cart back", async () => {
+    // The page shows only its loader while the storefront read is out, so nothing of the cart is on screen to check
+    // then. What is checked: a late answer costs a selling business no stored cart line.
+    let release: (v: unknown) => void = () => {};
+    const held = new Promise((r) => { release = r; });
+    api.apiGet.mockImplementation(async (path: string) => {
+      if (path === `/identity/businesses/slug/${SLUG}`) return { data: BUSINESS, error: null };
+      if (path === `/site/storefront/public/${SLUG}`) { await held; return { data: { storefront: {}, storeCheckout: true }, error: null }; }
+      if (path.endsWith("/services")) return { data: [SERVICE], error: null };
+      if (path.endsWith("/products")) return { data: [PRODUCT], error: null };
+      return { data: [], error: null };
+    });
+    window.localStorage.setItem(CART_KEY, JSON.stringify([PRODUCT_LINE, SERVICE_LINE]));
+    try {
+      render(<PublicBookingPage />);
+      await new Promise((r) => setTimeout(r, 50));
+      expect(storedCart().map((c) => c.id)).toEqual([PRODUCT.id, SERVICE.id]);
+    } finally {
+      release(null);
+    }
+    expect(await screen.findByRole("button", { name: "Open cart with 3 items" })).toBeTruthy();
+    await settle();
+    expect(storedCart().map((c) => c.id)).toEqual([PRODUCT.id, SERVICE.id]);
+  });
+
+  it("WHS2-10 DEPENDENCY PIN: against a server without the field (before P233) a selling business's store checkout is off", async () => {
+    // This is the fail-closed cost, stated on purpose: this web half must ship with or after server row P233.
+    storefront = { storefront: {}, completedOrdersCount: 12 };
+    products = [PRODUCT];
+    window.localStorage.setItem(CART_KEY, JSON.stringify([PRODUCT_LINE]));
+    render(<PublicBookingPage />);
+    await waitFor(() => {
+      expect(storedCartRaw()).toBe("[]");
+      expect(screen.queryAllByRole("button", { name: ADD })).toHaveLength(0);
+    });
+  });
+});

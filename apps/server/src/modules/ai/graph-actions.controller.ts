@@ -27,6 +27,7 @@ import { WorkspaceRecommendationsService } from './workspace-recommendations.ser
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { Request } from 'express';
 import { ActionExecutedPayload, ActionBlockedPayload } from '../../core/event-bus/events.types';
 import { CanonicalModule, LEVEL_RANK, isCanonicalModule, memberModuleLevel, rankOf } from '../../core/authority/module-vocabulary';
@@ -195,6 +196,13 @@ const GRAPH_ACTION_EXTRA_SCOPES: Readonly<Record<string, ReadonlyArray<GraphActi
   fetch_client_health: [{ module: 'revenue', minLevel: 'read' }],
   fetch_business_summary: [{ module: 'revenue', minLevel: 'read' }, { module: 'expenses', minLevel: 'read' }],
   fetch_expense_pressure: [{ module: 'revenue', minLevel: 'read' }, { module: 'expenses', minLevel: 'read' }],
+  // P160 (RR-LEGACY-FALLBACK-REMOVE): promoted legacy tools backed directly by Prisma hold
+  // member chat / KeyCommand / cortex bridge to their exact module scopes (D-100/D-145/D-234/D-37).
+  finance_list_overdue_invoices: [{ module: 'revenue', minLevel: 'read' }],
+  finance_create_invoice_reminder_draft: [{ module: 'revenue', minLevel: 'write' }],
+  commerce_summarize_revenue: [{ module: 'revenue', minLevel: 'read' }],
+  crm_recommend_follow_ups: [{ module: 'crm', minLevel: 'read' }],
+  crm_create_reminder: [{ module: 'crm', minLevel: 'write' }],
 };
 
 /**
@@ -239,6 +247,9 @@ export const KEY_BOOKS_MEMBERSHIP_READ_TOOLS: ReadonlySet<string> = new Set([
   'finance_safe_to_spend',
   'finance_cashflow_forecast',
   'finance_money_moves',
+  'finance_list_overdue_invoices',
+  'finance_create_invoice_reminder_draft',
+  'commerce_summarize_revenue',
 ]);
 
 /**
@@ -274,6 +285,7 @@ export const GRAPH_ACTION_CONTACT_READ_TOOLS: ReadonlySet<string> = new Set([
   'crm_search_contacts',
   'crm_find_duplicates',
   'crm_merge_preview',
+  'crm_recommend_follow_ups',
 ]);
 
 const CONTACT_READ_NO_PRINCIPAL =
@@ -334,6 +346,8 @@ const GRAPH_ACTION_VISIBILITY_BOUND_TOOLS: ReadonlySet<string> = new Set([
   'calendar_check_conflicts',
   'bookings_list_bookings',
   'bookings_list_waitlist',
+  'crm_create_reminder',
+  'command_create_item',
 ]);
 
 /**
@@ -370,6 +384,19 @@ export interface GraphActionRequirement {
   crmSubPermission?: 'crm_edit' | 'crm_delete';
 }
 
+const SCOPE_LEVEL_ORDER: Record<GraphActionScope['minLevel'], number> = { read: 1, write: 2, admin: 3 };
+
+function dedupeScopes(scopes: ReadonlyArray<GraphActionScope>): GraphActionScope[] {
+  const byModule = new Map<CanonicalModule, GraphActionScope>();
+  for (const s of scopes) {
+    const existing = byModule.get(s.module);
+    if (!existing || SCOPE_LEVEL_ORDER[s.minLevel] > SCOPE_LEVEL_ORDER[existing.minLevel]) {
+      byModule.set(s.module, s);
+    }
+  }
+  return Array.from(byModule.values());
+}
+
 /** The requirement for `toolName`, `{ refused }` when this route never runs it, or null when it is mapped to nothing. */
 export function graphActionRequirement(toolName: string): GraphActionRequirement | { refused: string } | null {
   if (Object.prototype.hasOwnProperty.call(GRAPH_ACTION_REFUSED, toolName)) return { refused: GRAPH_ACTION_REFUSED[toolName] };
@@ -385,7 +412,7 @@ export function graphActionRequirement(toolName: string): GraphActionRequirement
     : organ && 'scopes' in organ
       ? organ.scopes.slice(1)
       : [];
-  const requirement: GraphActionRequirement = { scopes: [scope, ...extra] };
+  const requirement: GraphActionRequirement = { scopes: dedupeScopes([scope, ...extra]) };
   if (CRM_ROW_VISIBILITY_TOOLS.includes(toolName)) {
     requirement.ownerOnly = 'it writes a contact with no actor, so no visibility clause bounds the row it reaches';
   } else if (GRAPH_ACTION_CONTACT_READ_TOOLS.has(toolName)) {
@@ -965,7 +992,8 @@ export class GraphActionsController {
     };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Post('actions/businesses/:businessId/plan')
   async planAction(
     @Param('businessId') businessId: string,

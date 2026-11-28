@@ -756,6 +756,7 @@ describe('the operations gate over HTTP (real guards, real rows)', () => {
     const ROUTE_LEVEL: Record<string, 'read' | 'write'> = {
       command_list_due_obligations: 'read',
       command_discharge_obligation: 'write',
+      command_create_item: 'write',
       procurement_list_requests: 'read',
       procurement_get_request: 'read',
       procurement_list_suppliers: 'read',

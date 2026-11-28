@@ -128,7 +128,7 @@ export class EvidenceService {
     const [items, total] = await Promise.all([
       this.prisma.client.evidence.findMany({
         where,
-        orderBy: { submittedAt: 'desc' },
+        orderBy: [{ submittedAt: 'desc' }, { id: 'desc' }],
         skip: options?.offset ?? 0,
         take: options?.limit ?? 50,
       }),

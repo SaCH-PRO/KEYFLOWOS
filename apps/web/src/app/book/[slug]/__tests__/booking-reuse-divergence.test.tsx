@@ -95,6 +95,8 @@ vi.mock("@/lib/api", () => ({
     if (path.endsWith("/services") || path.endsWith("/staff") || path.endsWith("/products") || path.includes("/gateways")) {
       return { data: [], error: null };
     }
+    // WEDGE-HIDE-STORE part 2 (D-263): this cart sells a product, so its business is one whose store checkout is offered.
+    if (path === `/site/storefront/public/${SLUG}`) return { data: { storeCheckout: true }, error: null };
     return { data: null, error: null };
   },
   apiPost: async ({ path, body }: { path: string; body: Record<string, unknown> }) => {

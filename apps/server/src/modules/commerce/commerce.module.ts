@@ -38,6 +38,7 @@ import { RevenueReportingRollupScheduler } from './revenue-reporting-rollup.sche
 import { RevenueForecastService } from './revenue-forecast.service';
 import { SlowPayerDetector } from './slow-payer-detector.service';
 import { PricingSignalsService } from './pricing-signals.service';
+import { PricingService } from './pricing.service';
 import { RevenueBriefingService } from './revenue-briefing.service';
 import { WeeklyRevenueReviewScheduler } from './weekly-revenue-review.scheduler';
 import { RevenueIntelligenceController } from './revenue-intelligence.controller';
@@ -126,6 +127,7 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
     RevenueForecastService,
     SlowPayerDetector,
     PricingSignalsService,
+    PricingService,
     RevenueBriefingService,
     WeeklyRevenueReviewScheduler,
     TimeCostService,
@@ -152,6 +154,7 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
     RevenueForecastService,
     SlowPayerDetector,
     PricingSignalsService,
+    PricingService,
     RevenueBriefingService,
     TimeCostService,
     DocumentTemplateService,

@@ -72,6 +72,8 @@ export type CatalogItem = {
   availableQuantity?: number | null;
   stockStatus?: "available" | "low" | "out_of_stock" | "backorder" | "untracked";
   purchasable?: boolean;
+  /** WEDGE-HIDE-STORE part 2 (D-263): the store checkout is not offered, so this item cannot be put in the cart. */
+  notForSale?: boolean;
 };
 
 export type CartItem = CatalogItem & { quantity: number };

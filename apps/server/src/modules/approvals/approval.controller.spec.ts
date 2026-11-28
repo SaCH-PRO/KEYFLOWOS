@@ -6,6 +6,7 @@ import { AiApprovalsController } from '../ai/ai-approvals.controller';
 
 function createMockApprovalService(): any {
   return {
+    assertMayCreateApprovalRequest: async () => ({ canDecide: true }),
     createRequest: async () => ({
       id: 'ar_1',
       status: 'pending',

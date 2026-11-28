@@ -3,6 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { BookingCompletedPayload } from '../../core/event-bus/events.types';
+import { readBusinessDayHours } from './business-hours.util';
 
 interface SlotUtilization {
   date: string;
@@ -138,11 +139,8 @@ export class BookingOptimizerService {
     return (business?.businessHours as any) ?? defaultHours;
   }
 
-  private getSlotsForDay(hours: { open: string; close: string; closed: boolean }, slotDurationMins = 60): number {
-    if (hours.closed) return 0;
-    const [oh, om] = hours.open.split(':').map(Number);
-    const [ch, cm] = hours.close.split(':').map(Number);
-    const totalMinutes = (ch * 60 + cm) - (oh * 60 + om);
+  private getSlotsForDay(openMin: number, closeMin: number, slotDurationMins = 60): number {
+    const totalMinutes = closeMin - openMin;
     return Math.max(0, Math.floor(totalMinutes / slotDurationMins));
   }
 
@@ -152,7 +150,6 @@ export class BookingOptimizerService {
     const endDate = new Date(startOfToday.getTime() + 7 * 24 * 60 * 60 * 1000);
 
     const businessHours = await this.getBusinessHours(businessId);
-    const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
     const bookings = await this.prisma.client.booking.findMany({
@@ -180,8 +177,7 @@ export class BookingOptimizerService {
     for (let i = 0; i < 7; i++) {
       const date = new Date(startOfToday.getTime() + i * 24 * 60 * 60 * 1000);
       const dateStr = date.toISOString().split('T')[0];
-      const dayKey = dayKeys[date.getDay()];
-      const dayHours = businessHours[dayKey];
+      const dayHours = readBusinessDayHours(businessHours, date.getDay());
 
       if (!dayHours || dayHours.closed) {
         result.push({
@@ -195,7 +191,7 @@ export class BookingOptimizerService {
         continue;
       }
 
-      const slotsPerStaff = this.getSlotsForDay(dayHours);
+      const slotsPerStaff = this.getSlotsForDay(dayHours.openMin, dayHours.closeMin);
       const totalSlots = slotsPerStaff * staffCount;
       const bookedSlots = bookingsByDate.get(dateStr) ?? 0;
       const utilizationRate = totalSlots > 0 ? Math.min(100, Math.round((bookedSlots / totalSlots) * 100)) : 0;
