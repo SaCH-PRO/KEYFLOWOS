@@ -92,14 +92,17 @@ describe("P257: the commerce SideSheet's other callers are unchanged", () => {
    * components/ui/side-sheet.tsx, a different component. Relative specifiers resolve from the importing file, `@/`
    * from src; only one that names the commerce side-sheet module counts.
    */
+  /** The side-sheet module specifiers a source text imports. */
+  function specifiersIn(text: string): string[] {
+    return [...text.matchAll(/from\s+["']([^"']*side-sheet)["']/g)].map((m) => m[1]);
+  }
+  /** Whether `spec`, imported by the file at `fromRel` (relative to src), is the commerce side-sheet module. */
+  function resolvesToSheet(fromRel: string, spec: string): boolean {
+    const resolved = spec.startsWith("@/") ? join(SRC, spec.slice(2)) : spec.startsWith(".") ? join(dirname(join(SRC, fromRel)), spec) : null;
+    return resolved === SHEET;
+  }
   function importsCommerceSheet(rel: string): boolean {
-    const text = readFileSync(join(SRC, rel), "utf8");
-    for (const m of text.matchAll(/from\s+["']([^"']*side-sheet)["']/g)) {
-      const spec = m[1];
-      const resolved = spec.startsWith("@/") ? join(SRC, spec.slice(2)) : spec.startsWith(".") ? join(dirname(join(SRC, rel)), spec) : null;
-      if (resolved === SHEET) return true;
-    }
-    return false;
+    return specifiersIn(readFileSync(join(SRC, rel), "utf8")).some((spec) => resolvesToSheet(rel, spec));
   }
   /** Every non-test source file under src, relative to src. */
   function sources(dir = SRC): string[] {
@@ -109,6 +112,33 @@ describe("P257: the commerce SideSheet's other callers are unchanged", () => {
       return /\.(ts|tsx)$/.test(e.name) && !/\.(test|spec)\.tsx?$/.test(e.name) ? [relative(SRC, full)] : [];
     });
   }
+  describe("P257 R3: the import forms the pin must see (fixture texts, not files)", () => {
+    const FROM = "app/app/commerce/recurring/fixture.tsx";
+    const cases: Array<[string, string]> = [
+      ["a static import", 'import { SideSheet } from "../components/side-sheet";'],
+      ["a dynamic import()", 'const SideSheet = (await import("../components/side-sheet")).SideSheet;'],
+      ["next/dynamic", 'const SideSheet = dynamic(() => import( "../components/side-sheet" ).then((m) => m.SideSheet));'],
+      ["require()", 'const { SideSheet } = require("../components/side-sheet");'],
+      ["an explicit .tsx", 'import { SideSheet } from "../components/side-sheet.tsx";'],
+      ["an explicit .js, through @/", 'import { SideSheet } from "@/app/app/commerce/components/side-sheet.js";'],
+    ];
+    for (const [form, text] of cases) {
+      it(`${form} is found and resolves to the commerce sheet`, () => {
+        const specs = specifiersIn(text);
+        expect(specs.length, `${form}: no side-sheet specifier found`).toBe(1);
+        expect(resolvesToSheet(FROM, specs[0]), `${form}: not resolved to the commerce sheet`).toBe(true);
+      });
+    }
+    it("control: the ui side-sheet, in any of these forms, is not the commerce sheet", () => {
+      for (const text of ['import { SideSheet } from "./side-sheet";', 'require("./side-sheet.tsx")', 'import("@/components/ui/side-sheet")']) {
+        expect(specifiersIn(text).some((s) => resolvesToSheet("components/ui/business-object-drawer.tsx", s)), text).toBe(false);
+      }
+    });
+    it("the source list is written with / on every platform", () => {
+      expect(sources().every((p) => !p.includes("\\")), "a path in sources() carries a backslash").toBe(true);
+      expect(sources()).toContain("app/app/commerce/components/side-sheet.tsx");
+    });
+  });
   for (const path of CALLERS) {
     it(`${path} imports this SideSheet (resolved) and passes no closeDisabled`, () => {
       expect(importsCommerceSheet(path), `${path} does not import the commerce side-sheet`).toBe(true);
