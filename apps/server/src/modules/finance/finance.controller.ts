@@ -276,7 +276,7 @@ export class FinanceController {
     if (toDay !== undefined && !isDateOnly(toDay)) throw new BadRequestException('Invalid to date');
 
     const parseTimestamp = (raw: string | undefined, day: string | undefined, label: string): Date | undefined => {
-      if (!raw || day !== undefined) return undefined;
+      if (raw === undefined || day !== undefined) return undefined;
       const d = new Date(raw);
       if (!isValidPostgresTimestamp(d)) throw new BadRequestException(`Invalid ${label}`);
       return d;

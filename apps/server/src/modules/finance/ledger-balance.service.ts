@@ -71,7 +71,11 @@ export function isValidPostgresTimestamp(d: Date): boolean {
 export function isDateOnly(value: unknown): value is string {
   if (typeof value !== 'string' || !DATE_ONLY.test(value)) return false;
   const utcMidnight = new Date(`${value}T00:00:00.000Z`);
-  return !Number.isNaN(utcMidnight.getTime()) && utcMidnight.toISOString().slice(0, 10) === value;
+  return (
+    !Number.isNaN(utcMidnight.getTime()) &&
+    utcMidnight.getTime() >= MIN_INSTANT_MS &&
+    utcMidnight.toISOString().slice(0, 10) === value
+  );
 }
 
 /** Whether `value` has the date-only shape, on the calendar or not. */
@@ -275,12 +279,11 @@ export class LedgerBalanceService {
    * General ledger detail view — chronological ledger rows with running balance.
    * Paginated; default page size 100.
    *
-   * V1-66 (SWP-FIN-LEDGER, BUG-029): the end of the range is `to` (a
-   * timestamp: lines dated at or before it) or `toDay` (a date-only day,
-   * YYYY-MM-DD: every line of that day in the business's timezone, that is
-   * dated before the next day starts there). A date-only end was read as
-   * midnight UTC with `<=`, which dropped the day after its first instant.
-   * `toDay` wins when both are given. `from` is unchanged (`>=` the instant).
+   * V1-66 (SWP-FIN-LEDGER, BUG-029) + FU-LEDGER-ZONED-FROM:
+   * - `fromDay` (YYYY-MM-DD) starts at local 00:00 in the business's timezone (`>= beginOfZonedDay`),
+   *   winning over `from` when both are passed; timestamp `from` keeps `>=`.
+   * - `toDay` (YYYY-MM-DD) covers the whole local day (`< endOfZonedDay`), winning over `to` when
+   *   both are passed; timestamp `to` keeps `<=`.
    */
   async getGeneralLedger(
     businessId: string,
@@ -303,6 +306,12 @@ export class LedgerBalanceService {
     const rawPageSize = opts.pageSize ?? 100;
     if (!Number.isInteger(rawPageSize) || rawPageSize < 1 || rawPageSize > MAX_GENERAL_LEDGER_PAGE_SIZE) {
       throw new BadRequestException('Invalid pageSize');
+    }
+    if (opts.fromDay !== undefined && !isDateOnly(opts.fromDay)) {
+      throw new BadRequestException('Invalid from date');
+    }
+    if (opts.toDay !== undefined && !isDateOnly(opts.toDay)) {
+      throw new BadRequestException('Invalid to date');
     }
     if (opts.from !== undefined && opts.fromDay === undefined && !isValidPostgresTimestamp(opts.from)) {
       throw new BadRequestException('Invalid from date');
