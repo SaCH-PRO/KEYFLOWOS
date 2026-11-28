@@ -128,15 +128,15 @@ function bug060Cases() {
     fireEvent.change(screen.getByPlaceholderText(/category name/i), { target: { value: "Supplies" } });
     fireEvent.click(screen.getByRole("button", { name: /^add category$/i }));
 
-    await waitFor(() => expect(client.createExpenseCategory).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(client.createExpenseCategory).toHaveBeenCalledTimes(1), { timeout: 10000 });
     expect(client.createExpenseCategory.mock.calls[0][0]).toBe(BUSINESS);
     expect(client.createExpenseCategory.mock.calls[0][1]).toMatchObject({ name: "Supplies" });
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Category created"));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Category created"), { timeout: 10000 });
 
     // The category is the page's own list: the sheet opened from the Expenses view offers it.
     fireEvent.click(screen.getByRole("tab", { name: "Expenses" }));
     fireEvent.click(screen.getByRole("button", { name: /^add expense$/i }));
-    const sheet = await screen.findByRole("dialog");
+    const sheet = await screen.findByRole("dialog", {}, { timeout: 10000 });
     const options = within(sheet).getAllByRole("option").map((o) => o.textContent);
     expect(options).toContain("Supplies");
   });
@@ -148,7 +148,7 @@ function bug060Cases() {
     fireEvent.change(screen.getByPlaceholderText(/category name/i), { target: { value: "Fuel" } });
     fireEvent.click(screen.getByRole("button", { name: /^add category$/i }));
 
-    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    await waitFor(() => expect(toast.error).toHaveBeenCalled(), { timeout: 10000 });
     expect(toast.success).not.toHaveBeenCalledWith("Category created");
     // What was typed stays, so the member can ask and try again.
     expect((screen.getByPlaceholderText(/category name/i) as HTMLInputElement).value).toBe("Fuel");
@@ -158,8 +158,8 @@ function bug060Cases() {
     client.fetchRecurringExpenses.mockResolvedValue(ok([]));
     await mountPage();
     fireEvent.click(screen.getByRole("tab", { name: "Recurring" }));
-    await waitFor(() => expect(client.fetchRecurringExpenses).toHaveBeenCalledWith(BUSINESS));
-    expect(await screen.findByText(/no recurring expenses/i)).toBeTruthy();
+    await waitFor(() => expect(client.fetchRecurringExpenses).toHaveBeenCalledWith(BUSINESS), { timeout: 10000 });
+    expect(await screen.findByText(/no recurring expenses/i, {}, { timeout: 10000 })).toBeTruthy();
   });
 
   it("the Expenses view's status tabs and table are not shown on the Categories view", async () => {

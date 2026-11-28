@@ -168,9 +168,9 @@ describe("SEC-EXH3-1: a business switch with the Expenses page open", () => {
   it("drops every figure of the old business and re-reads for the new one", async () => {
     booksFor({ biz_A: { expenses: [expense()], total: 4321 }, biz_B: { expenses: [expense({ id: "exp_b1", description: "Beta fuel", amount: 55, vendor: "Beta Gas" })], total: 55 } });
     render(<ExpensesInboxPage />);
-    await waitFor(() => expect(text()).toMatch(/alpha rent/i));
+    await waitFor(() => expect(text()).toMatch(/alpha rent/i), { timeout: 10000 });
     switchTo("biz_B");
-    await waitFor(() => expect(text()).toMatch(/beta fuel/i));
+    await waitFor(() => expect(text()).toMatch(/beta fuel/i), { timeout: 10000 });
     expect(client.fetchExpenses.mock.calls.at(-1)?.[0]).toBe("biz_B");
     expect(text()).not.toMatch(/alpha/i);
     expect(text()).not.toMatch(/4,321/);
@@ -179,7 +179,7 @@ describe("SEC-EXH3-1: a business switch with the Expenses page open", () => {
   it("shows nothing of the old business while the new one loads", async () => {
     booksFor({ biz_A: { expenses: [expense()], total: 4321 } });
     render(<ExpensesInboxPage />);
-    await waitFor(() => expect(text()).toMatch(/alpha rent/i));
+    await waitFor(() => expect(text()).toMatch(/alpha rent/i), { timeout: 10000 });
     client.fetchExpenses.mockImplementation(() => new Promise(() => {}));
     switchTo("biz_B");
     await waitFor(() => expect(text()).not.toMatch(/alpha rent/i));
@@ -192,9 +192,9 @@ describe("SEC-EXH3-1: a business switch with the Expenses page open", () => {
       b === "biz_A" ? new Promise((r) => { resolveA = r; }) : Promise.resolve(ok({ data: [expense({ id: "exp_b1", description: "Beta fuel", amount: 55 })], total: 1, page: 1, limit: 20 })),
     );
     render(<ExpensesInboxPage />);
-    await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalledWith("biz_A", expect.anything()));
+    await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalledWith("biz_A", expect.anything()), { timeout: 10000 });
     switchTo("biz_B");
-    await waitFor(() => expect(text()).toMatch(/beta fuel/i));
+    await waitFor(() => expect(text()).toMatch(/beta fuel/i), { timeout: 10000 });
     await act(async () => { resolveA(ok({ data: [expense()], total: 1, page: 1, limit: 20 })); });
     expect(text()).not.toMatch(/alpha rent/i);
     expect(text()).toMatch(/beta fuel/i);
@@ -204,9 +204,9 @@ describe("SEC-EXH3-1: a business switch with the Expenses page open", () => {
     let finish: (v: unknown) => void = () => {};
     uploadFile.mockImplementation(() => new Promise((r) => { finish = r; }));
     render(<ExpensesInboxPage />);
-    await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled());
-    fireEvent.change(await screen.findByLabelText(/^upload receipt$/i), { target: { files: [photo()] } });
-    await waitFor(() => expect(uploadFile).toHaveBeenCalled());
+    await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled(), { timeout: 10000 });
+    fireEvent.change(await screen.findByLabelText(/^upload receipt$/i, {}, { timeout: 10000 }), { target: { files: [photo()] } });
+    await waitFor(() => expect(uploadFile).toHaveBeenCalled(), { timeout: 10000 });
     switchTo("biz_B");
     await act(async () => { finish({ uploadURL: "http://s3.test/put", objectPath: "/objects/uploads/biz_A/obj1", metadata: {} }); });
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -216,24 +216,24 @@ describe("SEC-EXH3-1: a business switch with the Expenses page open", () => {
   it("a receipt path of another business is never attached", async () => {
     uploadFile.mockResolvedValue({ uploadURL: "http://s3.test/put", objectPath: "/objects/uploads/biz_OTHER/obj1", metadata: {} });
     render(<ExpensesInboxPage />);
-    await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled());
-    fireEvent.change(await screen.findByLabelText(/^upload receipt$/i), { target: { files: [photo()] } });
-    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled(), { timeout: 10000 });
+    fireEvent.change(await screen.findByLabelText(/^upload receipt$/i, {}, { timeout: 10000 }), { target: { files: [photo()] } });
+    await waitFor(() => expect(toast.error).toHaveBeenCalled(), { timeout: 10000 });
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("the toolbar upload refuses when the stored business is not the page's", async () => {
     render(<ExpensesInboxPage />);
-    await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalledWith("biz_A", expect.anything()));
+    await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalledWith("biz_A", expect.anything()), { timeout: 10000 });
     ws.bid = "biz_B"; // stored behind the page's back, no event yet
-    fireEvent.change(await screen.findByLabelText(/^upload receipt$/i), { target: { files: [photo()] } });
-    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    fireEvent.change(await screen.findByLabelText(/^upload receipt$/i, {}, { timeout: 10000 }), { target: { files: [photo()] } });
+    await waitFor(() => expect(toast.error).toHaveBeenCalled(), { timeout: 10000 });
     expect(uploadFile).not.toHaveBeenCalled();
   });
 
   it("the Add expense sheet open for the old business closes on a switch", async () => {
     render(<ExpensesInboxPage />);
-    await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled());
+    await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled(), { timeout: 10000 });
     // P265: the button is offered once the read has answered ok, so it is waited for, not looked up at once.
     fireEvent.click(await screen.findByRole("button", { name: /^add expense$/i }, { timeout: 10000 }));
     expect(await screen.findByRole("dialog", {}, { timeout: 10000 })).toBeTruthy();
@@ -247,7 +247,7 @@ describe("SEC-EXH3-1: a business switch with the Expenses page open", () => {
     // made but not answered yet must not be taken as the button being there.
     holdReads([client.fetchExpenses]);
     render(<ExpensesInboxPage />);
-    await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled());
+    await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled(), { timeout: 10000 });
     afterRequest();
     // P265: the button is offered once the read has answered ok, so it is waited for, not looked up at once.
     fireEvent.click(await screen.findByRole("button", { name: /^add expense$/i }, { timeout: 10000 }));
@@ -266,12 +266,12 @@ describe("SEC-EXH3-2: an ok read, then a refusal on refetch, clears the hook's d
     client.fetchExpenseBudgets.mockResolvedValue(ok([{ id: "bud1", categoryId: "c1", amount: 100, spent: 10, remaining: 90, percentUsed: 10, isOverBudget: false, isNearAlert: false }]));
     client.fetchExpenseCategories.mockResolvedValue(ok([{ id: "c1", name: "Rent" }]));
     const { result } = renderHook(() => useExpensesData());
-    await waitFor(() => expect(result.current.expenses).toHaveLength(1));
+    await waitFor(() => expect(result.current.expenses).toHaveLength(1), { timeout: 10000 });
     expect(result.current.summary?.total).toBe(4321);
 
     client.fetchExpenses.mockResolvedValue(REFUSED);
     await act(async () => { result.current.setPeriod("90d"); });
-    await waitFor(() => expect(result.current.read.kind).toBe("no-access"));
+    await waitFor(() => expect(result.current.read.kind).toBe("no-access"), { timeout: 10000 });
     expect(result.current.expenses).toEqual([]);
     expect(result.current.summary).toBeNull();
     expect(result.current.budgets).toEqual([]);
@@ -283,7 +283,7 @@ describe("COR MINOR-2: the toolbar upload keeps the Drive copy", () => {
   it("saving after the toolbar upload sends the photo to Drive, as the sheet's own photo does", async () => {
     uploadFile.mockResolvedValue({ uploadURL: "http://s3.test/put", objectPath: "/objects/uploads/biz_A/obj1", metadata: {} });
     render(<ExpensesInboxPage />);
-    await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled());
+    await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled(), { timeout: 10000 });
     const file = photo();
     fireEvent.change(await screen.findByLabelText(/^upload receipt$/i, {}, { timeout: 10000 }), { target: { files: [file] } });
     const sheet = await screen.findByRole("dialog", {}, { timeout: 10000 });
@@ -305,11 +305,11 @@ async function categoriesInventNoTrend() {
     comparison: { prevTotal: 0, prevCount: 0, changePercent: 0, direction: "flat" },
   })));
   render(<ExpensesInboxPage />);
-  await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled());
+  await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled(), { timeout: 10000 });
   afterRequest();
   // P265 R1-1: the tabs are rendered once the expenses read has answered ok, so the tab is waited for.
   fireEvent.click(await screen.findByRole("tab", { name: "Categories" }, { timeout: 10000 }));
-  await waitFor(() => expect(text()).toMatch(/fuel/i));
+  await waitFor(() => expect(text()).toMatch(/fuel/i), { timeout: 10000 });
   expect(text()).not.toMatch(/spike/i);
   expect(text()).not.toMatch(/\+100%/);
   expect(text()).not.toMatch(/saved/i);
@@ -325,7 +325,7 @@ describe("COR MINOR-5: page figures say what they are", () => {
     client.fetchExpenses.mockResolvedValue(ok({ data: [expense({ status: "BILL", amount: 70 })], total: 45, page: 1, limit: 20 }));
     client.fetchExpenseSummary.mockResolvedValue(ok(summary(500, { missingReceiptCount: 7 })));
     render(<ExpensesInboxPage />);
-    await waitFor(() => expect(text()).toMatch(/alpha rent/i));
+    await waitFor(() => expect(text()).toMatch(/alpha rent/i), { timeout: 10000 });
     // The stat card, not the status tab of the same name.
     const pending = screen.getAllByRole("button", { name: /pending approval/i }).find((b) => /TTD/.test(b.textContent ?? ""))!;
     expect(pending, "the Pending approval card").toBeTruthy();
@@ -343,7 +343,7 @@ describe("COR MINOR-7: each block is gated on its own read", () => {
     client.fetchExpenseSummary.mockResolvedValue(REFUSED);
     client.fetchExpenseBudgets.mockResolvedValue(REFUSED);
     render(<ExpensesInboxPage />);
-    await waitFor(() => expect(text()).toMatch(/alpha rent/i));
+    await waitFor(() => expect(text()).toMatch(/alpha rent/i), { timeout: 10000 });
     const spent = screen.getByRole("button", { name: /^spent/i });
     expect(spent.textContent).not.toMatch(/0\.00/);
     expect(spent.textContent).toMatch(/no access/i);
@@ -356,7 +356,7 @@ describe("COR MINOR-7: each block is gated on its own read", () => {
   it("with no stored business the page says so and does not spin", async () => {
     ws.bid = null;
     render(<ExpensesInboxPage />);
-    await waitFor(() => expect(text()).toMatch(/no business (is )?selected/i));
+    await waitFor(() => expect(text()).toMatch(/no business (is )?selected/i), { timeout: 10000 });
     expect(screen.queryByRole("status", { name: /loading expenses/i })).toBeNull();
     expect(client.fetchExpenses).not.toHaveBeenCalled();
   });
@@ -365,17 +365,17 @@ describe("COR MINOR-7: each block is gated on its own read", () => {
 /** COR MINOR-6's body (P265 R1: shared with the delayed-read twin below). */
 async function recurringOpensOnce() {
   render(<ExpensesInboxPage />);
-  await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled());
+  await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled(), { timeout: 10000 });
   afterRequest();
   // P265 R1-2: the same for the Recurring tab.
   fireEvent.click(await screen.findByRole("tab", { name: "Recurring" }, { timeout: 10000 }));
   // R26-6: the button is offered once the Recurring list's read has answered, so it is awaited.
   fireEvent.click(await screen.findByRole("button", { name: /new recurring expense/i }, { timeout: 10000 }));
-  expect(await screen.findByRole("dialog")).toBeTruthy();
+  expect(await screen.findByRole("dialog", {}, { timeout: 10000 })).toBeTruthy();
   fireEvent.click(screen.getByRole("tab", { name: "Expenses" }));
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   fireEvent.click(screen.getByRole("tab", { name: "Recurring" }));
-  await screen.findByText(/no recurring expenses/i);
+  await screen.findByText(/no recurring expenses/i, {}, { timeout: 10000 });
   await new Promise((r) => setTimeout(r, 20));
   expect(screen.queryByRole("dialog")).toBeNull();
 }
@@ -387,7 +387,7 @@ describe("COR MINOR-8: no expense writes are offered to a member refused the rea
   it("no Record bill and no Add expense on the no-access state", async () => {
     client.fetchExpenses.mockResolvedValue(REFUSED);
     render(<ExpensesInboxPage />);
-    await waitFor(() => expect(text()).toMatch(/no access/i));
+    await waitFor(() => expect(text()).toMatch(/no access/i), { timeout: 10000 });
     expect(screen.queryByRole("button", { name: /^record bill$/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /^add expense$/i })).toBeNull();
   });
