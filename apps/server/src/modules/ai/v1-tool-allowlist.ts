@@ -235,21 +235,37 @@ function ownProp(obj: Record<string, unknown>, key: string): unknown {
   return Object.prototype.hasOwnProperty.call(obj, key) ? obj[key] : undefined;
 }
 
+function isTraversableObject(value: unknown): value is object {
+  if (!value || typeof value !== 'object') return false;
+  if (value instanceof Date || value instanceof RegExp || ArrayBuffer.isView(value)) {
+    return false;
+  }
+  return true;
+}
+
 /**
  * Checks `toolOrActionName` and any nested tool/action name carried inside a
  * wrapper or proposal payload (`toolName`, `actionType`, and nested container
  * objects/arrays) using bounded BFS.
  *
- * Security (KEY-TOOL-ALLOWLIST R3 SEC MAJOR-2):
+ * Security & Correctness (KEY-TOOL-ALLOWLIST R3/R4):
  * - Guards all property reads with `hasOwnProperty` so prototype-inherited
  *   keys cannot spoof or false-positive.
- * - For wrapper invocations (`cortex.execute_tool`, `EXECUTE_TOOL`,
- *   `cortex_execute_tool`), also traverses alias containers (`params`, `args`,
- *   `input`, `toolCalls`, `steps`, `actions`), array elements, and alias tool
- *   fields (`tool`, `tool_name`).
- * - If a wrapper invocation truncates due to `maxDepth` or `maxNodes`, fails
- *   CLOSED by returning `V1_TOOL_UNAVAILABLE_MESSAGE`. Benign deep payloads on
- *   non-wrapper tools remain unaffected.
+ * - Traverses ONLY known standard payload keys (`payload`, `toolParams`,
+ *   `inputPayload`, `parameters`, `result`) and — on wrapper-active nodes —
+ *   wrapper alias containers (`params`, `args`, `input`, `toolCalls`, `steps`,
+ *   `actions`) plus array elements reached through them. Arbitrary business
+ *   data keys and built-in leaves (`Date`, `RegExp`, `TypedArray`) are never
+ *   walked, preventing both decoy node-budget exhaustion and false-positive
+ *   refusals on large legitimate payloads (e.g. multi-line invoices or Prisma
+ *   proposal envelopes).
+ * - Once a wrapper node resolves to a concrete non-wrapper v1-allowed tool
+ *   (e.g. `commerce_create_invoice`), its child argument containers are still
+ *   inspected for directly smuggled `toolName`/`actionType` (and any re-entered
+ *   nested wrapper flips wrapper mode back on), but normal business data inside
+ *   those arguments does not trigger wrapper-truncation fail-closed.
+ * - If any wrapper-active branch truncates due to `maxDepth` or `maxNodes`,
+ *   fails CLOSED by returning `V1_TOOL_UNAVAILABLE_MESSAGE`.
  */
 export function v1ToolRefusalReasonForInvocation(
   toolOrActionName: string | null | undefined,
@@ -261,28 +277,28 @@ export function v1ToolRefusalReasonForInvocation(
     const direct = v1ToolRefusalReason(toolOrActionName);
     if (direct) return direct;
   }
-  if (!payload || typeof payload !== 'object') {
+  if (!isTraversableObject(payload)) {
     return null;
   }
 
-  let sawWrapper = isWrapperToolName(toolOrActionName);
-  if (Array.isArray(payload) && !sawWrapper) {
+  const outerIsWrapper = isWrapperToolName(toolOrActionName);
+  if (Array.isArray(payload) && !outerIsWrapper) {
     return null;
   }
 
   const seen = new Set<object>();
   const queue: Array<{ value: object; depth: number; inWrapper: boolean }> = [
-    { value: payload as object, depth: 0, inWrapper: sawWrapper },
+    { value: payload, depth: 0, inWrapper: outerIsWrapper },
   ];
   let visited = 0;
-  let truncated = false;
+  let wrapperTruncated = false;
 
   const enqueueChild = (child: unknown, nextDepth: number, childInWrapper: boolean) => {
-    if (!child || typeof child !== 'object') return;
+    if (!isTraversableObject(child)) return;
     if (seen.has(child)) return;
     if (Array.isArray(child) && !childInWrapper) return;
     if (nextDepth > maxDepth) {
-      truncated = true;
+      if (childInWrapper) wrapperTruncated = true;
       return;
     }
     queue.push({ value: child, depth: nextDepth, inWrapper: childInWrapper });
@@ -304,70 +320,74 @@ export function v1ToolRefusalReasonForInvocation(
 
     const obj = current.value as Record<string, unknown>;
     let nodeInWrapper = current.inWrapper;
+    let explicitlyNamesWrapper = false;
+    let resolvedConcreteTool = false;
 
     const toolNameVal = ownProp(obj, 'toolName');
-    if (typeof toolNameVal === 'string') {
+    if (typeof toolNameVal === 'string' && toolNameVal.trim() !== '') {
       const refusal = v1ToolRefusalReason(toolNameVal);
       if (refusal) return refusal;
       if (isWrapperToolName(toolNameVal)) {
-        sawWrapper = true;
         nodeInWrapper = true;
+        explicitlyNamesWrapper = true;
+      } else {
+        resolvedConcreteTool = true;
       }
     }
     const actionTypeVal = ownProp(obj, 'actionType');
-    if (typeof actionTypeVal === 'string') {
+    if (typeof actionTypeVal === 'string' && actionTypeVal.trim() !== '') {
       const refusal = v1ToolRefusalReason(actionTypeVal);
       if (refusal) return refusal;
       if (isWrapperToolName(actionTypeVal)) {
-        sawWrapper = true;
         nodeInWrapper = true;
+        // `actionType: 'EXECUTE_TOOL'` on a proposal row is an envelope; only
+        // treat children as wrapper-active when no concrete non-wrapper
+        // `toolName` was already resolved on this same node.
+        if (!resolvedConcreteTool) {
+          explicitlyNamesWrapper = true;
+        }
       }
     }
 
     if (nodeInWrapper) {
       for (const aliasKey of V1_WRAPPER_ALIAS_TOOL_KEYS) {
         const aliasVal = ownProp(obj, aliasKey);
-        if (typeof aliasVal === 'string') {
+        if (typeof aliasVal === 'string' && aliasVal.trim() !== '') {
           const refusal = v1ToolRefusalReason(aliasVal);
           if (refusal) return refusal;
           if (isWrapperToolName(aliasVal)) {
-            sawWrapper = true;
+            explicitlyNamesWrapper = true;
+            resolvedConcreteTool = false;
+          } else if (!explicitlyNamesWrapper) {
+            resolvedConcreteTool = true;
           }
         }
       }
     }
 
+    // Keep wrapper-active traversal into children only while this node is still
+    // an unresolved wrapper or explicitly dispatches another wrapper tool.
+    const childInWrapper = nodeInWrapper && (!resolvedConcreteTool || explicitlyNamesWrapper);
+
     for (const key of V1_STANDARD_PAYLOAD_KEYS) {
-      enqueueChild(ownProp(obj, key), current.depth + 1, nodeInWrapper);
+      enqueueChild(ownProp(obj, key), current.depth + 1, childInWrapper);
     }
 
     if (nodeInWrapper) {
       for (const key of V1_WRAPPER_ALIAS_CONTAINER_KEYS) {
-        enqueueChild(ownProp(obj, key), current.depth + 1, true);
-      }
-      // Also detect shallow/wide decoy siblings inside wrapper containers so
-      // an attacker cannot exhaust `maxNodes` on arbitrary keys before our
-      // real target key is popped from the queue.
-      for (const key of Object.keys(obj)) {
-        if (
-          (V1_STANDARD_PAYLOAD_KEYS as readonly string[]).includes(key) ||
-          (V1_WRAPPER_ALIAS_CONTAINER_KEYS as readonly string[]).includes(key)
-        ) {
-          continue;
-        }
-        const val = obj[key];
-        if (val && typeof val === 'object') {
-          enqueueChild(val, current.depth + 1, true);
-        }
+        // Wrapper dispatch lists (`toolCalls`, `steps`, `actions`) remain
+        // wrapper-active even if an outer envelope also carries a `toolName`.
+        const isDispatchListKey = key === 'toolCalls' || key === 'steps' || key === 'actions';
+        enqueueChild(ownProp(obj, key), current.depth + 1, isDispatchListKey ? true : childInWrapper);
       }
     }
   }
 
-  if (queue.length > 0) {
-    truncated = true;
+  if (queue.some((entry) => entry.inWrapper && !seen.has(entry.value))) {
+    wrapperTruncated = true;
   }
 
-  if (truncated && sawWrapper) {
+  if (wrapperTruncated) {
     return V1_TOOL_UNAVAILABLE_MESSAGE;
   }
 
