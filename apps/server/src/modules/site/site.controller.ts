@@ -189,12 +189,7 @@ export class SiteController {
     // contact, or payment session) unless the business is on the unfiltered
     // `store` legacy list. Closed/unknown slugs still 404 from getPublicStorefront.
     const storefront = await this.siteService.getPublicStorefront(slug);
-    if (storefront.storeCheckout !== true) {
-      throw new ForbiddenException({
-        code: 'STORE_CHECKOUT_NOT_OFFERED',
-        message: 'Online store checkout is not available for this business',
-      });
-    }
+    SiteController.assertStoreCheckoutOffered(storefront);
 
     // W11-STORE-CHECKOUT-METHOD-GATE (F-21; D-106, D-18): the method, read
     // once, trimmed and upper-cased. Only no method, CASH, MANUAL, WIPAY,
@@ -277,6 +272,20 @@ export class SiteController {
   }
 
   /**
+   * P233 / P253 (D-263, D-297, D-300, D-304): refuse public store-checkout
+   * doors (checkout, gateways, validate-promo) whenever the business is not on
+   * the unfiltered `store` legacy list.
+   */
+  private static assertStoreCheckoutOffered(storefront: { storeCheckout?: boolean }): void {
+    if (storefront.storeCheckout !== true) {
+      throw new ForbiddenException({
+        code: 'STORE_CHECKOUT_NOT_OFFERED',
+        message: 'Online store checkout is not available for this business',
+      });
+    }
+  }
+
+  /**
    * V1-33: the checkout's Idempotency-Key header, trimmed; absent or blank means none. At most 255 characters.
    *
    * G6PUB-R3-STORE-ORDER-DOORS (recheck G6PUB-RC2-4): or, when no header is sent, the body's `idempotencyKey`.
@@ -310,6 +319,7 @@ export class SiteController {
   @Get('storefront/public/:slug/gateways')
   async getPublicGateways(@Param('slug') slug: string, @Query('currency') currency?: string) {
     const storefront = await this.siteService.getPublicStorefront(slug);
+    SiteController.assertStoreCheckoutOffered(storefront);
     const payable = typeof currency === 'string' && currency.trim() ? sanitize(currency.trim(), 8) : null;
     const gateways = await this.paymentsService.getStorefrontGateways(storefront.business.id, payable);
     return gateways.map((g) => ({ id: g.id, name: g.name, currencies: g.currencies }));
@@ -326,6 +336,7 @@ export class SiteController {
     },
   ) {
     const storefront = await this.siteService.getPublicStorefront(slug);
+    SiteController.assertStoreCheckoutOffered(storefront);
     const businessId = storefront.business.id;
 
     const cleanCode = sanitize(body.code ?? '', 100) ?? '';

@@ -119,7 +119,7 @@ One PR per wave, to main. Body from `.github/pull_request_template.md`: keep its
 Issue(s), Changes, Testing, Screenshots / Notes, Checklist) and fill them:
 
 - Summary: the wave name and the packet ids.
-- Related Issue(s): #80.
+- Related Issue(s): #273 (active control room; archived predecessor: #80).
 - Changes: one line per packet, with its ruling ids.
 - Testing: the commands of section 2 with the totals and the R0 line as printed, and for each packet both review
   verdicts. Tick a template checkbox only for a command you ran.
@@ -155,5 +155,6 @@ node scripts/agent-memory/status.mjs      # regenerates V1-STATUS.json and V1-ST
 ```
 
 Then rewrite `ORCHESTRATOR-STATE.md` (remove the merged row from section 3, set the next action for what it
-unblocked), post PROGRESS for the wave on #80, and commit the regenerated status and the state file in the next
+unblocked), post PROGRESS for the wave on #273 (active control room; roll over to a successor issue at 2,350 comments
+per `docs/development/agent-memory/README.md`), and commit the regenerated status and the state file in the next
 rulings or wave commit. `README.md` in this folder lists the full consolidation rules.

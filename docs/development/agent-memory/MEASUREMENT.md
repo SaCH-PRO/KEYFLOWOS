@@ -34,7 +34,7 @@ than the 2,739 inline, because of the usage notes. The saving is in the orchestr
 | New: `ORCHESTRATOR-STATE.md` + `V1-STATUS.md` + this folder's `README.md` | 10,211 + 4,814 + 12,350 = 27,375 |
 | The `CLAUDE.md` list, files only: `AGENTS.md`, `EXECUTION_CONTROL_STANDARD.md`, `AGENT_CONTROL_PLANE.md`, `MULTI-AGENT-EXECUTION-PROTOCOL.md`, `IMPLEMENTATION-WAVE-EXECUTION-BOARD.md`, `V1-HANDOFF-2026-11-20.md` | 14,446 + 12,691 + 45,555 + 5,479 + 14,064 + 12,077 = 104,312 |
 | The same list plus the plan of record, as `CLAUDE.md` item 6 names it | 104,312 + 743,647 = 847,959 |
-| Issue #80 (item 7) | not measured |
+| Issue #80 (item 7; active control room rolled over to #273 after #80 hit 2,500 comments) | not measured |
 
 The new first read does not replace the `CLAUDE.md` list: `CLAUDE.md` still requires it, and this packet may not
 edit `CLAUDE.md`. Until the owner rules on the proposed edit, the new files are an addition of 27,375
@@ -63,7 +63,7 @@ Compare the first two against 2,739 and against one real inline review brief.
 ## 5. Resume test
 
 Give a fresh agent only this: "Read `docs/development/agent-memory/README.md` in KEYFLOWOS/KEYFLOWOS and follow it.
-Do not open `MEASUREMENT.md` or issue #80, and do not read the plan or the build map whole. Then answer these ten
+Do not open `MEASUREMENT.md` or issue #273 (or archived #80), and do not read the plan or the build map whole. Then answer these ten
 questions and list what you opened." Pass: ten correct. Record the answers, the files opened and the characters read.
 
 **Run once, 2026-11-22, at main `5c17e7b4`** (one wave earlier than the answers below), by a fresh subagent of the
