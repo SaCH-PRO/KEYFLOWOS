@@ -269,7 +269,8 @@ describe("P263 R2: a position match never lands on a different field", () => {
     expect(document.activeElement).toBe(screen.getByTestId("A"));
     await flip(true);
     expect(document.activeElement, "the index recorded before Retry went away put focus on B").not.toBe(screen.getByTestId("B"));
-    expect([screen.getByTestId("A"), screen.getByRole("dialog")]).toContain(document.activeElement);
+    // The snapshot is taken again when Retry goes away, so A itself (not only "not B") is refocused.
+    expect(document.activeElement, "A was not refocused (the snapshot was not refreshed)").toBe(screen.getByTestId("A"));
   });
   it("R2-1 (c): a child's own state reveals 'extra' before 'next'; 'extra' focused, then a flip resets the child: focus is not on 'next'", async () => {
     function Reveal() {
@@ -342,6 +343,33 @@ describe("P263 R2: a position match never lands on a different field", () => {
     screen.getAllByRole("button", { name: "Remove" })[1].focus();
     await flip(true);
     expect(document.activeElement, "the wrong Remove was focused").toBe(screen.getAllByRole("button", { name: "Remove" })[1]);
+  });
+  it("R2-2: a 'Remove' that gains a phone-only twin (3 matches, not 2): no stale index lands on another row", async () => {
+    render(
+      <SideSheet open onClose={() => {}} title="Edit Expense">
+        <OnlyOn layout="phone"><button aria-label="Remove" data-row="phone">x</button></OnlyOn>
+        <button aria-label="Remove" data-row="1">x</button>
+        <button aria-label="Remove" data-row="2">x</button>
+      </SideSheet>,
+    );
+    await settle();
+    (document.querySelector('[data-row="2"]') as HTMLElement).focus();
+    await flip(true);
+    expect(document.activeElement, "matches[1] of a changed count focused row 1").not.toBe(document.querySelector('[data-row="1"]'));
+    expect(document.activeElement).toBe(screen.getByRole("dialog"));
+  });
+  it("R2-2: the focused 'Remove' exists on desktop only, its twin on both: the twin (another row) is not focused", async () => {
+    render(
+      <SideSheet open onClose={() => {}} title="Edit Expense">
+        <OnlyOn layout="desktop"><button aria-label="Remove" data-row="desktop">x</button></OnlyOn>
+        <button aria-label="Remove" data-row="both">x</button>
+      </SideSheet>,
+    );
+    await settle();
+    (document.querySelector('[data-row="desktop"]') as HTMLElement).focus();
+    await flip(true);
+    expect(document.activeElement, "a single match taken though there were two").not.toBe(document.querySelector('[data-row="both"]'));
+    expect(document.activeElement).toBe(screen.getByRole("dialog"));
   });
   it("R2-3: a tabindex=-1 element on one layout only does not count as a position", async () => {
     render(
