@@ -9,6 +9,9 @@
  * R1 (first review, 2 MINOR test gaps): R1-1 a change-and-save made for A after the page has switched to B sends
  * nothing (saveConfig's tenancy guard); R1-2 withConfigChange's three rules, pinned directly: "__root" merges at the
  * top, an array section (sections, faqEntries) is replaced, any other section is merged.
+ *
+ * R2 (D-331): R2-2 that late call also leaves B's own storefront config as it was (A's change is not applied to B's
+ * local state); P280 the status toggle is disabled while a save is in flight, and a second press sends nothing.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, renderHook, screen, waitFor, cleanup, fireEvent, act } from "@testing-library/react";
@@ -158,8 +161,11 @@ describe("P237 R1-1: a change-and-save made for A after a switch to B sends noth
     await waitFor(() => expect(hook.result.current.businessId).toBe("biz_B"));
     await waitFor(() => expect(hook.result.current.loading).toBe(false));
     client.updateStorefrontConfig.mockClear();
+    const bBefore = JSON.stringify(hook.result.current.storefrontConfig);
     await act(async () => { await captured("storeSettings", { storeStatus: "paused" }); });
     expect(client.updateStorefrontConfig, "A's change was written after the page switched to B").not.toHaveBeenCalled();
+    // R2-2: and B's own config, as shown, is not changed by A's late call
+    expect(JSON.stringify(hook.result.current.storefrontConfig), "A's change was applied to B's storefront config").toBe(bBefore);
   });
 });
 
@@ -196,5 +202,22 @@ describe("P237 R1-2: withConfigChange", () => {
     const before = JSON.stringify(base);
     withConfigChange(base, "storeSettings", { storeStatus: "paused" });
     expect(JSON.stringify(base)).toBe(before);
+  });
+});
+
+describe("P237 R2 (P280): the status toggle waits for the save in flight", () => {
+  it("while a save is in flight the toggle is disabled, and pressing it again sends no second save", async () => {
+    let release!: (v: unknown) => void;
+    client.updateStorefrontConfig.mockImplementation(() => new Promise((r) => { release = r; }));
+    render(<Operations />);
+    const pause = await screen.findByRole("button", { name: "Pause" });
+    await act(async () => { fireEvent.click(pause); });
+    await waitFor(() => expect(client.updateStorefrontConfig).toHaveBeenCalledTimes(1));
+    const [toggle] = screen.getAllByRole("button", { name: /^(Pause|Go Live)$/ });
+    expect(toggle, "the toggle can be pressed while its save is in flight").toBeDisabled();
+    await act(async () => { fireEvent.click(toggle); });
+    expect(client.updateStorefrontConfig, "a second status save was sent while the first was in flight").toHaveBeenCalledTimes(1);
+    await act(async () => { release(ok({})); });
+    await waitFor(() => expect(screen.getAllByRole("button", { name: /^(Pause|Go Live)$/ })[0]).toBeEnabled());
   });
 });
