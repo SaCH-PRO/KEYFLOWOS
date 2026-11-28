@@ -4981,42 +4981,52 @@ export class CommerceService {
   /** The statuses a reminder may be sent for (fail closed: every other status is refused). */
   private static readonly REMINDABLE_INVOICE_STATUSES: ReadonlySet<string> = new Set(['SENT', 'OVERDUE', 'PARTIALLY_PAID']);
   private static readonly REMINDER_CHANNELS: ReadonlySet<string> = new Set(['email', 'whatsapp', 'manual']);
-  // Disallows whitespace, control/CRLF characters, and angle-bracket injection while accepting local test TLDs.
+  // Disallows whitespace, control/CRLF characters, quotes, angle brackets, and empty/degenerate domain labels while accepting local test TLDs.
   private static readonly REMINDER_EMAIL_PATTERN =
-    /^[^\s@<>()[\]\\,;:]+@[^\s@<>()[\]\\,;:]+\.[^\s@<>()[\]\\,;:]+$/;
+    /^[^\s@<>()[\]\\,;:"]+@[^\s@<>()[\]\\,;:"'.]+(?:\.[^\s@<>()[\]\\,;:"'.]+)+$/;
 
   private static normalizeOptionalEmail(raw: unknown): string | null {
     if (raw === undefined || raw === null) return null;
     if (typeof raw !== 'string') {
       throw new BadRequestException('recipientEmail must be a valid email address');
     }
+    // Reject CR/LF, C0 controls (except horizontal tab), DEL, and C1 controls (incl. U+0085 NEL) BEFORE trimming.
+    for (let i = 0; i < raw.length; i++) {
+      const code = raw.charCodeAt(i);
+      if ((code <= 0x1f && code !== 0x09) || (code >= 0x7f && code <= 0x9f)) {
+        throw new BadRequestException('recipientEmail must be a valid email address');
+      }
+    }
     const trimmed = raw.trim();
     if (!trimmed) return null;
     if (trimmed.length > 320 || !CommerceService.REMINDER_EMAIL_PATTERN.test(trimmed)) {
       throw new BadRequestException('recipientEmail must be a valid email address');
     }
-    for (let i = 0; i < trimmed.length; i++) {
-      const code = trimmed.charCodeAt(i);
-      if (code <= 0x1f || code === 0x7f) {
-        throw new BadRequestException('recipientEmail must be a valid email address');
-      }
-    }
     return trimmed;
   }
 
   /**
-   * FU-REMINDER-HONESTY: re-read the invoice's status/existence from Postgres
-   * right before delivering a reminder so a concurrent payment, void, credit,
-   * or soft-delete cannot slip through between the initial read/link creation
-   * and email delivery.
+   * FU-REMINDER-HONESTY: re-read the invoice's status, contactId, and own-tenant
+   * payments from Postgres right before delivering a reminder so a concurrent
+   * payment, refund, void, credit, soft-delete, or contact reassignment cannot
+   * slip through between the initial read/link creation and email delivery.
    */
   private async assertRemindableAtSend(
     invoiceId: string,
     businessId: string,
-  ): Promise<import('@prisma/client').Invoice['status']> {
+    expectedContactId?: string | null,
+  ): Promise<{
+    status: import('@prisma/client').Invoice['status'];
+    payments: import('@prisma/client').Payment[];
+  }> {
     const current = await this.prisma.client.invoice.findFirst({
       where: { id: invoiceId, businessId, deletedAt: null },
-      select: { id: true, status: true },
+      select: {
+        id: true,
+        status: true,
+        contactId: true,
+        payments: { where: { businessId } },
+      },
     });
     if (!current) throw new NotFoundException('Invoice not found');
     if (!CommerceService.REMINDABLE_INVOICE_STATUSES.has(current.status)) {
@@ -5024,7 +5034,10 @@ export class CommerceService {
         `A reminder can only be sent for a SENT, OVERDUE or PARTIALLY_PAID invoice; this invoice is ${current.status}`,
       );
     }
-    return current.status;
+    if (expectedContactId !== undefined && current.contactId !== expectedContactId) {
+      throw new ConflictException('Invoice contact changed before reminder could be sent');
+    }
+    return { status: current.status, payments: current.payments };
   }
 
   /**
@@ -5078,9 +5091,12 @@ export class CommerceService {
     const targetRecipientEmail = requestedRecipient ?? contactEmail;
     const channel: 'email' | 'whatsapp' | 'manual' =
       input.channel ?? (targetRecipientEmail ? 'email' : 'manual');
-    if (channel === 'email' && targetRecipientEmail !== null) {
-      CommerceService.normalizeOptionalEmail(targetRecipientEmail);
-    }
+    const emailRecipient =
+      channel === 'email'
+        ? CommerceService.normalizeOptionalEmail(
+            requestedRecipient !== null ? requestedRecipient : invoice.contact?.email ?? null,
+          )
+        : null;
 
     // Always provide a pay CTA in the reminder. Reuse the active link if one
     // already exists, otherwise create one — `createPaymentLink` itself
@@ -5101,7 +5117,7 @@ export class CommerceService {
         // reminder — re-read and surface the canonical 404/409 refusal.
         const msg = err instanceof Error ? err.message : String(err);
         if (/paid or voided/i.test(msg)) {
-          await this.assertRemindableAtSend(invoice.id, input.businessId);
+          await this.assertRemindableAtSend(invoice.id, input.businessId, invoice.contactId);
         }
         throw err;
       }
@@ -5111,10 +5127,10 @@ export class CommerceService {
       paymentUrl = `${appUrl()}/public/invoice/${link.token}`;
     }
 
-    // FU-REMINDER-HONESTY: re-check status & existence right before delivery
-    // to close the TOCTOU window opened by payment-link lookup/rotation/creation.
-    const currentStatus = await this.assertRemindableAtSend(invoice.id, input.businessId);
-    const freshInvoice = currentStatus === invoice.status ? invoice : { ...invoice, status: currentStatus };
+    // FU-REMINDER-HONESTY: re-check status, contactId & own-tenant payments right
+    // before delivery to close the TOCTOU window opened by link lookup/rotation/creation.
+    const current = await this.assertRemindableAtSend(invoice.id, input.businessId, invoice.contactId);
+    const freshInvoice = { ...invoice, status: current.status, payments: current.payments };
 
     let delivered: boolean;
     let messageId: string | undefined;
@@ -5122,18 +5138,18 @@ export class CommerceService {
     try {
       const result = await input.deliver({
         invoice: freshInvoice,
-        recipientEmail: targetRecipientEmail,
+        recipientEmail: emailRecipient,
         paymentUrl,
         channel,
       });
       delivered = result.delivered;
       messageId = result.messageId;
       recordedRecipientEmail =
-        result.recipientEmail !== undefined
-          ? result.recipientEmail
-          : channel === 'email' && delivered
-            ? targetRecipientEmail
-            : null;
+        channel === 'email' && delivered
+          ? result.recipientEmail !== undefined
+            ? CommerceService.normalizeOptionalEmail(result.recipientEmail)
+            : emailRecipient
+          : null;
     } catch (err: any) {
       // Persist the event regardless so the timeline shows the operator's
       // intent even when delivery fails — but surface the error to the UI.
@@ -5155,7 +5171,7 @@ export class CommerceService {
           channel,
           messageId: messageId ?? null,
           recipientEmail: recordedRecipientEmail,
-          status: currentStatus,
+          status: current.status,
         },
         actorType: input.actorId ? 'USER' : 'SYSTEM',
         actorId: input.actorId,
