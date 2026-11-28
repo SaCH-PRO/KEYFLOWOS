@@ -1755,6 +1755,11 @@
       "prefix": "v92r_",
       "owner": "apps/server/test/general-ledger-zoned-from.integration.test.ts",
       "packet": "V1-92 (FU-LEDGER-ZONED-FROM, Journey H)"
+    },
+    {
+      "prefix": "v72k_",
+      "owner": "apps/server/test/key-learning-outcome-semantics.integration.test.ts",
+      "packet": "V1-72 (RR-LEARNING-OUTCOME-SEMANTICS)"
     }
   ],
   "pendingRenames": [],
