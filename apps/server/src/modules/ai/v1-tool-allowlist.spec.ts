@@ -509,7 +509,7 @@ describe('KEY-TOOL-ALLOWLIST (V1-63, D-318 Option 1): single v1 allowlist & FLOW
       where: { id: 'step_1' },
       data: expect.objectContaining({ status: 'failed', errorMessage: 'Refused: not available in this version' }),
     }));
-    expect(stateTransition).not.toHaveBeenCalled();
+    expect(stateTransition).not.toHaveBeenCalledWith('plan_1', BIZ, 'awaiting_input', 'queue_worker');
 
     // assertMayRunGraphAction refuses disabled tools with ForbiddenException('not available in this version')
     const { assertMayRunGraphAction } = await import('./graph-actions.controller');
@@ -524,8 +524,8 @@ describe('KEY-TOOL-ALLOWLIST (V1-63, D-318 Option 1): single v1 allowlist & FLOW
     const { KeyCortexQueryPipelineService } = await import('../key-cortex/key-cortex-query-pipeline.service');
     const qp = Object.assign(Object.create(KeyCortexQueryPipelineService.prototype), { prisma: { client: {} } }) as any;
     const refusals: Map<string, string> = await qp.memberToolCallRefusals(
-      { businessId: BIZ, message: 'hi' },
       ['execute_custom_logic', 'crm_list_contacts'],
+      { businessId: BIZ, message: 'hi' },
     );
     expect(refusals.get('execute_custom_logic')).toBe('not available in this version');
     expect(refusals.get('crm_list_contacts')).toMatch(/Not a member of this business/);

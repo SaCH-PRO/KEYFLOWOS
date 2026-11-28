@@ -33,7 +33,7 @@ import { KeyCortexCompensationService } from './key-cortex-compensation.service'
 import { KeyCortexLearningService } from './key-cortex-learning.service';
 import { KeyCortexAuditService } from './key-cortex-audit.service';
 import { KeyCortexEventBusService } from './key-cortex-event-bus.service';
-import { isToolAllowedInV1, v1ToolRefusalReason } from '../ai/v1-tool-allowlist';
+import { isToolAllowedInV1, v1ToolRefusalReason, v1ToolRefusalReasonForInvocation } from '../ai/v1-tool-allowlist';
 import { GatewayToolDefinition } from './key-cortex.types';
 
 export interface KeyCortexToolContext {
@@ -480,7 +480,7 @@ export class KeyCortexToolRegistryService {
     ctx: KeyCortexToolContext,
     input: Record<string, unknown> = {},
   ): Promise<KeyCortexToolResult> {
-    const v1Refusal = v1ToolRefusalReason(name);
+    const v1Refusal = v1ToolRefusalReasonForInvocation(name, input);
     if (v1Refusal) {
       return { success: false, error: v1Refusal };
     }

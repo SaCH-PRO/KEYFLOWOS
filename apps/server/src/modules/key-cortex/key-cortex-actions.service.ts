@@ -26,7 +26,7 @@ import {
   type MemoryReaderContext,
 } from './memory-class-read-projection';
 import { KeyCommandService } from '../ai/key-command.service';
-import { isToolAllowedInV1, v1ToolRefusalReason, V1_TOOL_UNAVAILABLE_MESSAGE } from '../ai/v1-tool-allowlist';
+import { isToolAllowedInV1, v1ToolRefusalReason, v1ToolRefusalReasonForInvocation, V1_TOOL_UNAVAILABLE_MESSAGE } from '../ai/v1-tool-allowlist';
 import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
 import { AutonomyOrchestratorService } from '../key-autonomy/autonomy-orchestrator.service';
 import { AutonomyLevelService } from '../key-autonomy/autonomy-level.service';
@@ -333,15 +333,7 @@ export class KeyCortexActionsService implements OnModuleInit {
   }
 
   private v1RefusalForAction(action: CortexActionResult): string | null {
-    const direct = v1ToolRefusalReason(this.actionTypeToToolName(action.actionType));
-    if (direct) return direct;
-    if (String(action.actionType).trim().toUpperCase() === 'EXECUTE_TOOL') {
-      const nestedTool = (action.result as Record<string, unknown> | undefined)?.toolName;
-      if (typeof nestedTool === 'string') {
-        return v1ToolRefusalReason(nestedTool);
-      }
-    }
-    return null;
+    return v1ToolRefusalReasonForInvocation(this.actionTypeToToolName(action.actionType), action.result);
   }
 
   private async resolveAutonomyLevel(businessId: string): Promise<number> {
