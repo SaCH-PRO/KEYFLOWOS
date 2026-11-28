@@ -16,7 +16,8 @@ vi.mock("@/lib/workspace", () => ({
 }));
 
 import { SideSheet } from "../side-sheet";
-import { ContactSelect, type ContactSelectItem } from "@/components/contacts";
+import { ContactSelect } from "@/components/contacts";
+import type { ContactSelectItem } from "@/components/contacts/contact-select";
 
 const ADA: ContactSelectItem = { id: "ct_ada", firstName: "Ada", lastName: "Customer", email: "ada@example.test" };
 

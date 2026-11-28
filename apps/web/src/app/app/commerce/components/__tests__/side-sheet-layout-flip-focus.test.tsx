@@ -12,7 +12,7 @@
  * phone-only focusable; R2-3 tabindex=-1 positions.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { render, screen, cleanup, fireEvent, act, waitFor } from "@testing-library/react";
 
 import { SideSheet } from "../side-sheet";
@@ -151,6 +151,28 @@ describe("P263: focus stays in the sheet across a layout flip", () => {
     view.rerender(el(true));
     await settle();
     expect((screen.getByLabelText("Draft") as HTMLInputElement).value, "a reopened sheet kept the old draft").toBe("");
+  });
+  it("R3: a child mounts into the document: its layout effect sees itself connected, and autoFocus lands", async () => {
+    const seen: boolean[] = [];
+    function Measures() {
+      const ref = useRef<HTMLDivElement>(null);
+      useLayoutEffect(() => { seen.push(!!ref.current?.isConnected); }, []);
+      return <div ref={ref}>measured</div>;
+    }
+    render(<SideSheet open onClose={() => {}} title="Edit Expense"><Measures /><input aria-label="First" autoFocus /></SideSheet>);
+    expect(seen, "the child's layout effect ran on a detached node").toEqual([true]);
+    await settle();
+    expect(screen.getByText("measured").closest('[role="dialog"]'), "the child is not in the panel").toBe(screen.getByRole("dialog"));
+  });
+  it("R3: reopened while it is still animating out: the late exit-complete does not remove the open sheet's children", async () => {
+    const el = (open: boolean) => <SideSheet open={open} onClose={() => {}} title="Edit Expense"><input aria-label="Draft" /></SideSheet>;
+    const view = render(el(true));
+    await settle();
+    view.rerender(el(false));
+    view.rerender(el(true)); // before the exit has finished
+    await act(async () => { await new Promise((r) => setTimeout(r, 1200)); }); // longer than the exit animation
+    expect(screen.queryByLabelText("Draft"), "the open sheet lost its children when the old exit completed").not.toBeNull();
+    expect(screen.getByLabelText("Draft").closest('[role="dialog"]')).toBe(screen.getByRole("dialog"));
   });
   it("typing after the flip goes to the field (focus is usable, not only reported)", async () => {
     render(<Sheet />);

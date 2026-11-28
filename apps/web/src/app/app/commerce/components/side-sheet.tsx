@@ -1,47 +1,13 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useCallback, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useCallback, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 
-/**
- * P263: what identifies the control focused in the panel, so the same control can be found again in a remounted panel
- * (the node itself is gone). Read by iterating the panel's elements and comparing attributes: no selector is built, so
- * an id or label with any characters is matched and the lookup cannot throw.
- */
-type FocusSnapshot = {
-  /** The panel itself was focused. */
-  panel: boolean;
-  /**
-   * Each identifier the control carries (an attribute, or the text of its <label>s), with how many elements in the
-   * panel carried that value and which of them this control was.
-   */
-  ids: Array<{ key: IdKey; value: string; nth: number; count: number }>;
-  /** Its index among the panel's focusables, and the whole sequence of their tag:type (P263 R2-1). */
-  index: number;
-  sequence: string[];
-  /** The control itself: detached by the remount, it still holds its caret and selection, read when refocusing. */
-  node: HTMLElement | null;
-};
-type IdKey = "id" | "name" | "aria-label" | "placeholder" | "label";
-const ID_KEYS: IdKey[] = ["id", "name", "aria-label", "placeholder", "label"];
-const FOCUSABLE = 'a[href],button,input,select,textarea,[tabindex],[contenteditable="true"]';
-function focusablesIn(panel: HTMLElement): HTMLElement[] {
-  return Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => el !== panel && el.getAttribute("tabindex") !== "-1");
-}
-const signature = (el: HTMLElement) => `${el.tagName}:${el.getAttribute("type") ?? ""}`;
-/** An identifier's value on an element: an attribute, or (P263 R2-1) the text of the element's <label>s. */
-function idValue(el: HTMLElement, key: IdKey): string | null {
-  if (key !== "label") return el.getAttribute(key) || null;
-  const labels = (el as HTMLInputElement).labels;
-  const text = labels ? Array.from(labels).map((l) => (l.textContent ?? "").trim()).filter(Boolean).join(" ") : "";
-  return text || null;
-}
-function carrying(panel: HTMLElement, key: IdKey, value: string): HTMLElement[] {
-  return Array.from(panel.querySelectorAll<HTMLElement>("*")).filter((el) => idValue(el, key) === value);
-}
-function selectionOf(el: HTMLElement): [number, number] | null {
+/** A text field's caret and selection, or null (P263 R1-6). */
+function selectionOf(el: Element): [number, number] | null {
   if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return null;
   try {
     return el.selectionStart === null || el.selectionEnd === null ? null : [el.selectionStart, el.selectionEnd];
@@ -49,50 +15,16 @@ function selectionOf(el: HTMLElement): [number, number] | null {
     return null; // input types with no selection (number, date, ...) throw on read in some engines
   }
 }
-function snapshotOf(el: HTMLElement, panel: HTMLElement): FocusSnapshot {
-  if (el === panel) return { panel: true, ids: [], index: -1, sequence: [], node: null };
-  const ids: FocusSnapshot["ids"] = [];
-  for (const key of ID_KEYS) {
-    const value = idValue(el, key);
-    if (!value) continue;
-    const matches = carrying(panel, key, value);
-    ids.push({ key, value, nth: matches.indexOf(el), count: matches.length });
-  }
-  const focusables = focusablesIn(panel);
-  return { panel: false, ids, index: focusables.indexOf(el), sequence: focusables.map(signature), node: el };
-}
-/** The control in `panel` that the snapshot names, or null (then the panel is focused). */
-function findAgain(snap: FocusSnapshot, panel: HTMLElement): HTMLElement | null {
-  if (snap.panel) return null;
-  try {
-    for (const { key, value, nth, count } of snap.ids) {
-      const matches = carrying(panel, key, value);
-      // P263 R1-2, R2-2: an identifier names this control when it matches one element, or the same one of as many
-      // matches as before. P263 R1-3: one that finds nothing (a useId id that changed) falls through.
-      if (matches.length === 1 && count === 1) return matches[0];
-      if (matches.length > 1 && matches.length === count && nth >= 0) return matches[nth];
-    }
-    // P263 R1-1, R2-1: no identifier names it: the same position, only when the panel's focusables are the same
-    // controls in the same order (any added, removed or reordered control could put a different field there).
-    const focusables = focusablesIn(panel);
-    const same = focusables.length === snap.sequence.length && focusables.every((el, i) => signature(el) === snap.sequence[i]);
-    if (same && snap.index >= 0) return focusables[snap.index] ?? null;
-  } catch {
-    // never let a lookup throw out of the layout effect: focus the panel instead
-  }
-  return null;
-}
-/** Focuses the control again (with its caret and selection), or the panel when it is gone or cannot take focus. */
-function refocus(snap: FocusSnapshot, panel: HTMLElement) {
-  const target = findAgain(snap, panel);
-  target?.focus();
-  // P263 R1-4: a matched control that cannot take focus now (disabled) leaves focus on <body>: the panel takes it.
-  if (!target || !panel.contains(document.activeElement)) { panel.focus(); return; }
-  // P263 R1-6: a text field keeps its caret and selection (as the old node last had them).
-  const selection = snap.node ? selectionOf(snap.node) : null;
-  if (selection && (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) {
-    try { target.setSelectionRange(selection[0], selection[1]); } catch { /* a type with no selection */ }
-  }
+/**
+ * The control in the new shell that stands for one in the old shell (the header's Close, a footer button): the same
+ * tag with the same accessible label and text, when exactly one matches. The children are never matched this way:
+ * they are the same nodes (P263 R3).
+ */
+function shellCounterpart(old: HTMLElement, panel: HTMLElement, content: HTMLElement): HTMLElement | null {
+  const same = Array.from(panel.querySelectorAll<HTMLElement>(old.tagName)).filter(
+    (el) => !content.contains(el) && el.getAttribute("aria-label") === old.getAttribute("aria-label") && el.textContent === old.textContent,
+  );
+  return same.length === 1 ? same[0] : null;
 }
 
 interface SideSheetProps {
@@ -163,20 +95,31 @@ export function SideSheet({
     };
   }, [open, close]);
 
-  // P263: the panel is keyed by the layout, so a resize or rotation while open remounts it and the focused control is
-  // removed (focus falls to <body>). While open, the control focused in the panel is remembered (FocusSnapshot); when
-  // the layout flips, that control in the new panel is focused, or the panel itself when it cannot be found or take
-  // focus. Focus outside the sheet is left alone.
-  // P263 R2-4: a focus change only records the focused node and the panel it is in (O(1): no scan of the panel). The
-  // snapshot is taken when the layout flips, against that panel as it was when the remount detached it (the node's own
-  // tree), so its position is never stale (R2-1 (b)) and a large panel costs nothing per tab or click.
-  const focusedRef = useRef<{ node: HTMLElement; panel: HTMLElement } | null>(null);
+  // P263 R3: the panel is keyed by the layout, so a resize or rotation while open remounts the shell (the phone bottom
+  // sheet or the desktop panel). The children do not remount with it: they render once, through a portal, into a
+  // container this sheet owns, and the container is moved into the current shell's content slot. On a flip the same
+  // nodes, with their focus target, caret, typed values and component state, are carried over. Moving a focused node
+  // drops its focus, so the node focused before the flip is focused again (exactly that node; no matching), and its
+  // caret and selection are put back. A control in the shell itself (the header's Close, a footer button) is
+  // focused in the new shell when one stands for it, otherwise the panel is. Focus outside the sheet is left alone.
+  // The container is made once, on the client only (the server has no document and renders no children, as before
+  // R3, since the sheet is closed there), and the children stay rendered while the sheet animates out (present until
+  // AnimatePresence reports its exit complete). The container is put in the slot by the slot's ref, and the portal is
+  // rendered after the shell, so the slot is in place before the children's own layout effects run: a child that
+  // measures itself, or autoFocus, finds itself in the document on mount.
+  const [content] = useState<HTMLDivElement | null>(() => (typeof document === "undefined" ? null : document.createElement("div")));
+  const [present, setPresent] = useState(open);
+  if (open && !present) setPresent(true);
+  /** Set when the container moved into a new slot: what had focus then (the old shell is already gone) and its caret. */
+  const movedRef = useRef<{ last: HTMLElement | null; selection: [number, number] | null } | null>(null);
+  // R2-4: a focus change only records the focused node (O(1)); nothing is read from the panel until a flip.
+  const focusedRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
     if (!open) return;
     const onFocusIn = (e: FocusEvent) => {
       const el = e.target as HTMLElement | null;
       const panel = panelRef.current;
-      focusedRef.current = el && panel && panel.contains(el) ? { node: el, panel } : null;
+      focusedRef.current = el && panel && panel.contains(el) ? el : null;
     };
     document.addEventListener("focusin", onFocusIn);
     return () => {
@@ -185,18 +128,34 @@ export function SideSheet({
       focusedRef.current = null;
     };
   }, [open]);
-  const layoutRef = useRef(isMobile);
-  useLayoutEffect(() => {
-    if (layoutRef.current === isMobile) return;
-    layoutRef.current = isMobile;
-    const panel = panelRef.current;
+  const attachSlot = useCallback((slot: HTMLDivElement | null) => {
+    if (!slot || !content || content.parentNode === slot) return;
     const last = focusedRef.current;
-    if (!open || !panel || !last) return;
-    refocus(snapshotOf(last.node, last.panel), panel);
-  }, [isMobile, open]);
+    movedRef.current = { last, selection: last ? selectionOf(last) : null };
+    slot.appendChild(content);
+  }, [content]);
+  useLayoutEffect(() => {
+    const moved = movedRef.current;
+    movedRef.current = null;
+    if (!open || !moved || !content) return;
+    const { last, selection } = moved;
+    const panel = panelRef.current;
+    if (!last || !panel || document.activeElement === last) return;
+    if (content.contains(last)) {
+      last.focus();
+    } else if (last !== panel && !last.isConnected) {
+      shellCounterpart(last, panel, content)?.focus();
+    }
+    // A control that cannot take focus now (disabled) leaves focus on <body>: the panel takes it (P263 R1-4).
+    if (!panel.contains(document.activeElement)) { panel.focus(); return; }
+    if (selection && document.activeElement === last && (last instanceof HTMLInputElement || last instanceof HTMLTextAreaElement)) {
+      try { last.setSelectionRange(selection[0], selection[1]); } catch { /* a type with no selection */ }
+    }
+  }); // every commit: whatever remounted the slot, the move is handled in the commit that made it
 
   return (
-    <AnimatePresence>
+    <>
+    <AnimatePresence onExitComplete={() => setPresent(false)}>
       {open && (
         <motion.div
           initial={{ opacity: 0 }}
@@ -256,9 +215,7 @@ export function SideSheet({
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto overscroll-contain p-4">
-                {children}
-              </div>
+              <div ref={attachSlot} className="flex-1 overflow-y-auto overscroll-contain p-4" />
 
               {footer && (
                 <div className="p-4 border-t border-border/40 shrink-0 bg-card pb-safe">
@@ -304,9 +261,7 @@ export function SideSheet({
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto overscroll-contain p-5">
-                {children}
-              </div>
+              <div ref={attachSlot} className="flex-1 overflow-y-auto overscroll-contain p-5" />
 
               {footer && (
                 <div className="p-4 border-t border-border/40 shrink-0 bg-card">
@@ -318,6 +273,8 @@ export function SideSheet({
         </motion.div>
       )}
     </AnimatePresence>
+    {present && content && createPortal(children, content)}
+    </>
   );
 }
 
