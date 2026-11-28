@@ -216,6 +216,17 @@ describe("SEC-EXH3-1: a business switch with the Expenses page open", () => {
     switchTo("biz_B");
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
+  it("P265: the same, with the expenses read answering a macrotask later (as a network reply does)", async () => {
+    // The Add expense button is offered only once the expenses read has answered ok (page.tsx). A read that has been
+    // made but not answered yet must not be taken as the button being there.
+    client.fetchExpenses.mockImplementation(() => new Promise((r) => setTimeout(() => r(ok({ data: [], total: 0, page: 1, limit: 20 })), 0)));
+    render(<ExpensesInboxPage />);
+    await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: /^add expense$/i }));
+    expect(await screen.findByRole("dialog")).toBeTruthy();
+    switchTo("biz_B");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
 });
 
 describe("SEC-EXH3-2: an ok read, then a refusal on refetch, clears the hook's data", () => {
