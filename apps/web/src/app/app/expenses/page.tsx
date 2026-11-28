@@ -32,6 +32,7 @@ import { useUpload } from "@/hooks/use-upload";
 import { useExpensesData } from "./components/use-expenses-data";
 import { ExpenseFormSideSheet, ExpensePrefill, isOwnUploadPath } from "./components/expense-form-sidesheet";
 import { ReadFailureNote } from "./components/read-failure-note";
+import type { BlockRead } from "./components/use-expenses-data";
 import { ExpenseCategoriesTab } from "./components/expense-categories-tab";
 import RecurringExpensesPanel from "./components/recurring-expenses-panel";
 import { PERIODS, formatCurrency, formatDate, expenseExportFileName, startRefusal, canStartFor, BUSINESS_CHANGED_ELSEWHERE } from "./components/expense-utils";
@@ -214,6 +215,7 @@ export default function ExpensesInboxPage() {
   const [view, setView] = useState<ExpensesView>("expenses");
   const [showFilters, setShowFilters] = useState(false);
   const [recurringTrigger, setRecurringTrigger] = useState(0);
+  const [recurringRead, setRecurringRead] = useState<BlockRead>({ kind: "loading" });
   // EXPENSES-HUB-3: "Upload receipts" was a button with no handler. A receipt goes up through the one presigned
   // upload (hooks/use-upload.ts) and opens Add expense with it attached; saving writes it to Expense.receiptUrl.
   const { uploadFile, isUploading: uploadingReceipt } = useUpload();
@@ -531,6 +533,8 @@ export default function ExpensesInboxPage() {
 
         {view === "recurring" && (
           <div role="tabpanel" id="expenses-panel-recurring" aria-labelledby="expenses-view-recurring" className="space-y-4">
+            {/* R26-6: offered only when the Recurring list's read answered (never beside a refused or unread list). */}
+            {recurringRead.kind === "ok" && (
             <div className="flex justify-end">
               <button
                 onClick={() => setRecurringTrigger((n) => n + 1)}
@@ -540,7 +544,8 @@ export default function ExpensesInboxPage() {
                 New recurring expense
               </button>
             </div>
-            <RecurringExpensesPanel businessId={d.businessId} categories={d.categories} triggerNew={recurringTrigger} isCurrentBusiness={d.isCurrentBusiness} categoriesRead={d.categoriesRead} onRetryCategories={retryRead} />
+            )}
+            <RecurringExpensesPanel businessId={d.businessId} categories={d.categories} triggerNew={recurringTrigger} isCurrentBusiness={d.isCurrentBusiness} categoriesRead={d.categoriesRead} onRetryCategories={retryRead} onListRead={setRecurringRead} />
           </div>
         )}
 

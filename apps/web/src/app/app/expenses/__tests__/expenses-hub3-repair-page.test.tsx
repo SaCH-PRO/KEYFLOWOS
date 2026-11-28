@@ -322,7 +322,8 @@ describe("COR MINOR-6: the Recurring builder opens only on a new click", () => {
     render(<ExpensesInboxPage />);
     await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled());
     fireEvent.click(screen.getByRole("tab", { name: "Recurring" }));
-    fireEvent.click(screen.getByRole("button", { name: /new recurring expense/i }));
+    // R26-6: the button is offered once the Recurring list's read has answered, so it is awaited.
+    fireEvent.click(await screen.findByRole("button", { name: /new recurring expense/i }));
     expect(await screen.findByRole("dialog")).toBeTruthy();
     fireEvent.click(screen.getByRole("tab", { name: "Expenses" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());

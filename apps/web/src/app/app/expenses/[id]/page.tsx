@@ -108,6 +108,13 @@ export default function ExpenseDetailPage() {
   // R22-3: and this page still shows it. Once it has left (this tab's switch), a reply is stale even if another tab
   // stores this business again before its storage event arrives.
   const leftRef = useRef(false);
+  // R26-1: whether this page is still mounted. A Retry's reply that outlives the page (the user has gone, and may be
+  // on another business's page) sets nothing and navigates nowhere, as the main read's `active` flag does (R16-1).
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   const isCurrentBusiness = useCallback((forBusiness: string) => !leftRef.current && getStoredBusinessId() === forBusiness, []);
   // R19-5: replies to this page's actions are judged by the start check's test.
   const live = (forBusiness: string) => canStartFor(forBusiness, isCurrentBusiness);
@@ -143,8 +150,12 @@ export default function ExpenseDetailPage() {
     // R16-1: a read that lands after this page has gone (unmounted, or the read replaced) does nothing, and above
     // all navigates nowhere: the user may be on another page by then.
     let active = true;
+    // R26-3: whether this read has shown its expense, so a later failure (the budgets read) is said for its block.
+    let loadedExpense = false;
     (async () => {
       setLoading(true);
+      // R26-4: a read starts from nothing: a new expense id whose read fails is never shown as the previous expense.
+      setExpense(null);
       setExpRead({ kind: "loading" });
       try {
         const [expRes, catRes] = await Promise.all([
@@ -165,6 +176,7 @@ export default function ExpenseDetailPage() {
         }
         setExpense(expRes.data);
         setExpRead({ kind: "ok" });
+        loadedExpense = true;
         const catState = readState(catRes, { what: "the category" });
         setCatRead(catState);
         setCategories(catState.kind === "ok" ? catRes.data ?? [] : []);
@@ -179,8 +191,14 @@ export default function ExpenseDetailPage() {
       } catch {
         // R23-6: the start check's test, which reads the stored id safely (blocked storage refuses, never throws).
         if (active && canStartFor(businessId, isCurrentBusiness)) {
-          toast.error("Failed to load expense");
-          setExpRead((prev) => (prev.kind === "ok" ? prev : { kind: "failed", message: "Couldn't load this expense." }));
+          if (loadedExpense) {
+            // R26-3: the expense is shown; what failed is its budgets read (the categories answered with it).
+            toast.error("Couldn't load this category's budget.");
+            setBudRead((prev) => (prev.kind === "loading" ? { kind: "failed", message: "Couldn't load this category's budget." } : prev));
+          } else {
+            toast.error("Failed to load expense");
+            setExpRead({ kind: "failed", message: "Couldn't load this expense." });
+          }
         }
       }
       if (active) setLoading(false);
@@ -199,12 +217,13 @@ export default function ExpenseDetailPage() {
     setCatRead({ kind: "loading" });
     try {
       const res = await fetchExpenseCategories(businessId);
-      if (leftRef.current) return;
+      if (!mountedRef.current || leftRef.current) return;
       if (!isCurrentBusiness(businessId)) { leave(); return; }
       const st = readState(res, { what: "the category" });
       setCatRead(st);
       setCategories(st.kind === "ok" ? res.data ?? [] : []);
     } catch {
+      if (!mountedRef.current || leftRef.current) return;
       if (canStartFor(businessId, isCurrentBusiness)) setCatRead({ kind: "failed", message: "Couldn't load the category." });
     }
   }, [businessId, isCurrentBusiness, leave]);
@@ -215,20 +234,22 @@ export default function ExpenseDetailPage() {
     try {
       const { month, year } = expenseMonth(expense.date, businessId);
       const res = await fetchExpenseBudgets(businessId, month, year);
-      if (leftRef.current) return;
+      if (!mountedRef.current || leftRef.current) return;
       if (!isCurrentBusiness(businessId)) { leave(); return; }
       const st = readState(res, { what: "this category's budget" });
       setBudRead(st);
       setBudgets(st.kind === "ok" ? res.data ?? [] : []);
     } catch {
+      if (!mountedRef.current || leftRef.current) return;
       if (canStartFor(businessId, isCurrentBusiness)) setBudRead({ kind: "failed", message: "Couldn't load this category's budget." });
     }
   }, [businessId, expense, isCurrentBusiness, leave]);
 
   const category = useMemo(() => categories.find((c) => c.id === expense?.categoryId), [categories, expense]);
-  // R24b: an expense with a category the page could not read is never called "Uncategorized".
-  const categoryUnread = !!expense?.categoryId && !category && readFailure(catRead) !== null;
-  const categoryLabel = category?.name || (categoryUnread ? "Couldn't load the category" : "Uncategorized");
+  // R24b: an expense with a category the page could not read is never called "Uncategorized"; R26-2: nor while it is
+  // being read again.
+  const categoryUnread = !!expense?.categoryId && !category && catRead.kind !== "ok";
+  const categoryLabel = category?.name || (categoryUnread ? (catRead.kind === "loading" ? "Loading…" : "Couldn't load the category") : "Uncategorized");
   const budget = useMemo(() => budgets.find((b) => b.categoryId === expense?.categoryId), [budgets, expense]);
   const status = useMemo(() => (expense ? deriveStatus(expense) : { label: "", color: "", bg: "" }), [expense]);
 
@@ -546,6 +567,9 @@ export default function ExpenseDetailPage() {
               ) : (
                 readFailure(budRead) ? (
                   <ReadFailureNote read={budRead} onRetry={() => { void retryBudgets(); }} className="text-sm text-muted-foreground" />
+                ) : budRead.kind === "loading" ? (
+                  // R26-2: a budget being read again is not "No budget set".
+                  <p className="text-sm text-muted-foreground">Loading…</p>
                 ) : (
                   <p className="text-sm text-muted-foreground">No budget set for this category.</p>
                 )

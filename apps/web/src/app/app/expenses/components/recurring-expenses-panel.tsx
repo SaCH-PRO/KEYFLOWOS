@@ -37,6 +37,8 @@ interface RecurringExpensesPanelProps {
   /** R24b: the categories read's own state; a refused one is said here, where schedules name their category. */
   categoriesRead?: BlockRead;
   onRetryCategories?: () => void;
+  /** R26-6: told the list read's state, so the page offers "New recurring expense" only when the list answered. */
+  onListRead?: (read: BlockRead) => void;
 }
 
 const FREQUENCIES: Record<string, string> = {
@@ -47,7 +49,7 @@ const FREQUENCIES: Record<string, string> = {
   YEARLY: "Yearly",
 };
 
-export default function RecurringExpensesPanel({ businessId, categories, triggerNew, isCurrentBusiness: hookCheck, categoriesRead, onRetryCategories }: RecurringExpensesPanelProps) {
+export default function RecurringExpensesPanel({ businessId, categories, triggerNew, isCurrentBusiness: hookCheck, categoriesRead, onRetryCategories, onListRead }: RecurringExpensesPanelProps) {
   const shownCheck = useShownBusiness(businessId);
   const isCurrentBusiness = hookCheck ?? shownCheck;
   // R19-5: every reply is judged by the start check's test (the given check, and the stored id).
@@ -56,6 +58,7 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
   const [loading, setLoading] = useState(true);
   // R25-2: the list's own read state: a refused, thrown or no-access read is said, never "No recurring expenses".
   const [listRead, setListRead] = useState<BlockRead>({ kind: "loading" });
+  useEffect(() => { onListRead?.(listRead); }, [listRead, onListRead]);
   const [showBuilder, setShowBuilder] = useState(false);
   const [editing, setEditing] = useState<RecurringExpense | null>(null);
   // R14-6: an editor opened for one business closes when the panel shows another, so Update can never send a
@@ -77,6 +80,8 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
   const load = useCallback(async () => {
     if (!businessId) { setLoading(false); return; }
     setLoading(true);
+    // R26-5: the list is being read: its Retry is not offered again until this read answers (one read at a time).
+    setListRead({ kind: "loading" });
     try {
       const res = await fetchRecurringExpenses(businessId);
       // R12: a read for a business no longer shown writes nothing. (A read, not a write's reply: it is judged by the

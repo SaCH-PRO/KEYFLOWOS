@@ -78,11 +78,6 @@ beforeEach(() => {
 });
 afterEach(() => cleanup());
 
-async function mount(over: Partial<Expense> = {}) {
-  client.getExpense.mockResolvedValue(ok(expense(over)));
-  render(<ExpenseDetailPage />);
-  await screen.findByRole("heading", { name: "Office Depot" });
-}
 
 
 /** Another tab has switched: the stored id says B, but no storage event has reached this tab yet. */
