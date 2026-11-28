@@ -352,14 +352,9 @@ describe('founding-membership inventory and deterministic repair — real DB', (
 
     const out = await founding.repairDeterministic({ apply: true, businessIdPrefix: P });
 
-    // Scoped to this suite's rows on purpose. `classify()` sweeps every business
-    // in the database by design, and sibling integration suites seed their own,
-    // so asserting an exact global repair list would make this test fail for
-    // reasons that have nothing to do with the behaviour under test.
-    expect(out.repaired).toContain(seeded.safe.id);
-    for (const id of [seeded.conflict.id, seeded.role.id, seeded.ambiguous.id, seeded.ghost.id]) {
-      expect(out.repaired).not.toContain(id);
-    }
+    // Scoped to this suite's prefix (`businessIdPrefix: P`) so mutating repair
+    // never races with sibling integration suites sharing the test database.
+    expect(out.repaired).toEqual([seeded.safe.id]);
     const repaired = await db.membership.findMany({ where: { businessId: seeded.safe.id } });
     expect(repaired).toHaveLength(1);
     expect(repaired[0]).toMatchObject({ userId: seeded.safeOwner, role: 'OWNER' });
@@ -378,9 +373,9 @@ describe('founding-membership inventory and deterministic repair — real DB', (
 
     const second = await founding.repairDeterministic({ apply: true, businessIdPrefix: P });
 
-    // Nothing of ours is left in the deterministic class, and the second pass
-    // added no row of ours.
-    expect(second.repaired).not.toContain(seeded.safe.id);
+    // Nothing in this prefix is left in the deterministic class, and the second
+    // pass added no row.
+    expect(second.repaired).toEqual([]);
     expect(await db.membership.count({ where: { businessId: { startsWith: P } } })).toBe(afterFirst);
   });
 
