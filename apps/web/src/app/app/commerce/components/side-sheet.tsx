@@ -1,9 +1,34 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useCallback, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useCallback, useState, useSyncExternalStore, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-is-mobile";
+
+/** No store to subscribe to: useSyncExternalStore here only tells the server render (and hydration) from the client. */
+const subscribeNothing = () => () => {};
+
+/** A text field's caret and selection, or null (P263 R1-6). */
+function selectionOf(el: Element): [number, number] | null {
+  if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return null;
+  try {
+    return el.selectionStart === null || el.selectionEnd === null ? null : [el.selectionStart, el.selectionEnd];
+  } catch {
+    return null; // input types with no selection (number, date, ...) throw on read in some engines
+  }
+}
+/**
+ * The control in the new shell that stands for one in the old shell (the header's Close, a footer button): the same
+ * tag with the same accessible label and text, when exactly one matches. The children are never matched this way:
+ * they are the same nodes (P263 R3).
+ */
+function shellCounterpart(old: HTMLElement, panel: HTMLElement, content: HTMLElement): HTMLElement | null {
+  const same = Array.from(panel.querySelectorAll<HTMLElement>(old.tagName)).filter(
+    (el) => !content.contains(el) && el.getAttribute("aria-label") === old.getAttribute("aria-label") && el.textContent === old.textContent,
+  );
+  return same.length === 1 ? same[0] : null;
+}
 
 interface SideSheetProps {
   open: boolean;
@@ -73,6 +98,67 @@ export function SideSheet({
     };
   }, [open, close]);
 
+  // P263 R3: the panel is keyed by the layout, so a resize or rotation while open remounts the shell (the phone bottom
+  // sheet or the desktop panel). The children do not remount with it: they render once, through a portal, into a
+  // container this sheet owns, and the container is moved into the current shell's content slot. On a flip the same
+  // nodes, with their focus target, caret, typed values and component state, are carried over. Moving a focused node
+  // drops its focus, so the node focused before the flip is focused again (exactly that node; no matching), and its
+  // caret and selection are put back. A control in the shell itself (the header's Close, a footer button) is
+  // focused in the new shell when one stands for it, otherwise the panel is. Focus outside the sheet is left alone.
+  // The container is made once, on the client only (the server has no document). The portal sits inside the overlay,
+  // after the keyed panel: the overlay is not remounted by a flip, so in the React tree the children stay under the
+  // sheet (R4): they read the sheet's own presence (a child's exit runs when the sheet closes; a caller's
+  // AnimatePresence is not held by them), and their clicks stop at the sheet as the panel's do. The slot's ref puts the
+  // container in place before the children's own layout effects run, so a child that measures itself, or autoFocus,
+  // finds itself in the document on mount. The portal is rendered only once mounted on the client: a sheet rendered
+  // open on the server has an empty slot there, and hydrates to the same before the children are put in (R4-3).
+  const [content] = useState<HTMLDivElement | null>(() => (typeof document === "undefined" ? null : document.createElement("div")));
+  const mounted = useSyncExternalStore(subscribeNothing, () => true, () => false);
+  /** Set when the container moved into a new slot: what had focus then (the old shell is already gone) and its caret. */
+  const movedRef = useRef<{ last: HTMLElement | null; selection: [number, number] | null } | null>(null);
+  // R2-4: a focus change only records the focused node (O(1)); nothing is read from the panel until a flip.
+  const focusedRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onFocusIn = (e: FocusEvent) => {
+      const el = e.target as HTMLElement | null;
+      const panel = panelRef.current;
+      focusedRef.current = el && panel && panel.contains(el) ? el : null;
+    };
+    document.addEventListener("focusin", onFocusIn);
+    return () => {
+      document.removeEventListener("focusin", onFocusIn);
+      // and no detached subtree stays referenced once the sheet is closed
+      focusedRef.current = null;
+    };
+  }, [open]);
+  const attachSlot = useCallback((slot: HTMLDivElement | null) => {
+    if (!slot || !content || content.parentNode === slot) return;
+    const last = focusedRef.current;
+    movedRef.current = { last, selection: last ? selectionOf(last) : null };
+    slot.appendChild(content);
+  }, [content]);
+  useLayoutEffect(() => {
+    const moved = movedRef.current;
+    movedRef.current = null;
+    if (!open || !moved || !content) return;
+    const { last, selection } = moved;
+    const panel = panelRef.current;
+    if (!last || !panel || document.activeElement === last) return;
+    if (content.contains(last)) {
+      last.focus();
+    } else if (last !== panel && !last.isConnected) {
+      shellCounterpart(last, panel, content)?.focus();
+    }
+    // A control that cannot take focus now (disabled) leaves focus on <body>: the panel takes it (P263 R1-4).
+    if (!panel.contains(document.activeElement)) { panel.focus(); return; }
+    // The caret is put back explicitly: in Chromium focus() keeps an input's caret, so this is equivalent there (the
+    // jsdom mutant survives for the same reason); WebKit and Firefox may move it on focus, so it is kept for them.
+    if (selection && document.activeElement === last && (last instanceof HTMLInputElement || last instanceof HTMLTextAreaElement)) {
+      try { last.setSelectionRange(selection[0], selection[1]); } catch { /* a type with no selection */ }
+    }
+  }); // every commit: whatever remounted the slot, the move is handled in the commit that made it
+
   return (
     <AnimatePresence>
       {open && (
@@ -134,9 +220,7 @@ export function SideSheet({
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto overscroll-contain p-4">
-                {children}
-              </div>
+              <div ref={attachSlot} className="flex-1 overflow-y-auto overscroll-contain p-4" />
 
               {footer && (
                 <div className="p-4 border-t border-border/40 shrink-0 bg-card pb-safe">
@@ -182,9 +266,7 @@ export function SideSheet({
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto overscroll-contain p-5">
-                {children}
-              </div>
+              <div ref={attachSlot} className="flex-1 overflow-y-auto overscroll-contain p-5" />
 
               {footer && (
                 <div className="p-4 border-t border-border/40 shrink-0 bg-card">
@@ -193,6 +275,7 @@ export function SideSheet({
               )}
             </motion.div>
           )}
+          {mounted && content && createPortal(<div onClick={(e) => e.stopPropagation()}>{children}</div>, content)}
         </motion.div>
       )}
     </AnimatePresence>
