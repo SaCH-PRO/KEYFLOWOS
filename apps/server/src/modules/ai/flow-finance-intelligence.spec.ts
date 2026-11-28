@@ -196,12 +196,12 @@ describe('P44 (TOF-FINANCE-CANONICAL-TOOLS): canonical finance intelligence tool
     });
   });
 
-  it('rejects boolean, empty, null, non-finite, and out-of-range horizonDays on real executeToolDirectly dispatch (validateToolInput)', async () => {
+  it('rejects boolean, empty, non-finite, and out-of-range horizonDays on real executeToolDirectly dispatch (validateToolInput) while stripping strict-mode null on optional horizonDays', async () => {
     const { svc, cashflowForecast } = makeOrchestrator({
       revRead: { role: 'STAFF', permissionScopes: { revenue: 'read' } },
     });
 
-    for (const badType of [true, false, '', '   ', null, 'soon', Number.NaN, Number.POSITIVE_INFINITY]) {
+    for (const badType of [true, false, '', '   ', 'soon', Number.NaN, Number.POSITIVE_INFINITY]) {
       await expect(
         executeAsMember(svc, 'finance_cashflow_forecast', {
           surface: 'CHAT',
@@ -220,6 +220,17 @@ describe('P44 (TOF-FINANCE-CANONICAL-TOOLS): canonical finance intelligence tool
       ).rejects.toThrow(/horizonDays must be between 1 and 365/);
     }
     expect(cashflowForecast.forecast).not.toHaveBeenCalled();
+
+    // RR-STRICT-TOOL-SCHEMAS (D-261/D-262): OpenAI strict mode encodes optional
+    // fields as nullable, so validateToolInput strips null on optional horizonDays
+    // and the handler applies its default 90-day horizon.
+    await expect(
+      executeAsMember(svc, 'finance_cashflow_forecast', {
+        surface: 'CHAT',
+        principalUserId: 'revRead',
+        args: { horizonDays: null },
+      }),
+    ).resolves.toMatchObject({ horizonDays: 90 });
 
     await expect(
       executeAsMember(svc, 'finance_cashflow_forecast', {
