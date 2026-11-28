@@ -59,14 +59,20 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
   // R25-2: the list's own read state: a refused, thrown or no-access read is said, never "No recurring expenses".
   const [listRead, setListRead] = useState<BlockRead>({ kind: "loading" });
   useEffect(() => { onListRead?.(listRead); }, [listRead, onListRead]);
-  const [showBuilder, setShowBuilder] = useState(false);
+  // P254 R6-1: the builder is open FOR a business and a generation of this panel's business (bumped on every change
+  // below), and it shows only while both are the ones rendered. No ordering of a late open and a switch (a queued New
+  // landing mid-render, a time-sliced switch, A -> B -> A) can show one business's builder under another, or after a
+  // switch: the open is judged when it renders, not when it is queued.
+  const [builderOpen, setBuilderOpen] = useState<{ business: string; gen: number } | null>(null);
+  const [businessGen, setBusinessGen] = useState(0);
   const [editing, setEditing] = useState<RecurringExpense | null>(null);
   // R14-6: an editor opened for one business closes when the panel shows another, so Update can never send a
   // schedule of the old business to the new one (React's "reset state on a prop change", during render).
   const [editorFor, setEditorFor] = useState(businessId);
   if (editorFor !== businessId) {
     setEditorFor(businessId);
-    setShowBuilder(false);
+    setBusinessGen((g) => g + 1);
+    setBuilderOpen(null);
     // Not observable on its own (every path that opens the builder sets `editing` first, and only the builder
     // saves): kept so no state of the old business outlives the switch. R15's mutation table lists it as equivalent.
     setEditing(null);
@@ -78,7 +84,8 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
   }
 
   const load = useCallback(async () => {
-    if (!businessId) { setLoading(false); return; }
+    // P254: with no business nothing is read: no list, no read that answered, nothing to add a schedule to.
+    if (!businessId) { setRecurring([]); setListRead({ kind: "loading" }); setLoading(false); return; }
     setLoading(true);
     // R26-5: the list is being read: its Retry is not offered again until this read answers (one read at a time).
     setListRead({ kind: "loading" });
@@ -99,14 +106,30 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
   }, [businessId, isCurrentBusiness]);
 
   useEffect(() => { queueMicrotask(load); }, [load]);
+  // P254 R5-1: the builder opens only on a change of triggerNew while this panel is mounted, never on the value it
+  // mounted with: the page unmounts the panel on every reload (a failed read and its Try again, A -> B -> A in one
+  // batch), and a New pressed before that must not open the builder again unprompted. The last value seen is kept, so
+  // after a reset to 0 the next New (1) opens. Nothing mounts the panel with a New to act on: New is offered only while
+  // it is mounted, and a tab change resets the trigger (COR MINOR-6).
+  // The open is stamped with the business and generation of the render that committed the New (P254 R1-2, R4-1,
+  // R5-3, R6-1): it shows only while they are still the ones rendered, so a business change alone never reopens the
+  // builder (COR MINOR-6), and a New made before a switch opens nothing however late it lands.
+  const seenTrigger = useRef(triggerNew);
   useEffect(() => {
-    if (triggerNew) {
+    const before = seenTrigger.current;
+    seenTrigger.current = triggerNew;
+    if (triggerNew === before) return;
+    if (triggerNew && businessId) {
+      const at = { business: businessId, gen: businessGen };
       queueMicrotask(() => {
         setEditing(null);
-        setShowBuilder(true);
+        setBuilderOpen(at);
       });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- opens on a change of triggerNew only (COR MINOR-6); the business and generation are the committed render's
   }, [triggerNew]);
+  const openBuilder = () => { if (businessId) setBuilderOpen({ business: businessId, gen: businessGen }); };
+  const showBuilder = builderOpen !== null && builderOpen.business === businessId && builderOpen.gen === businessGen;
 
   // SEC-r1-2: one save at a time (a double click creates one schedule); cleared however the save ends.
   const savingRef = useRef(false);
@@ -145,7 +168,7 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
         return;
       }
       toast.success(editing ? "Recurring expense updated" : "Recurring expense created");
-      setShowBuilder(false);
+      setBuilderOpen(null);
       setEditing(null);
       void load();
     } catch {
@@ -193,7 +216,7 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
   return (
     <div className="space-y-4">
       <ReadFailureNote read={categoriesRead} onRetry={onRetryCategories} />
-      {readFailure(listRead) ? (
+      {!businessId ? null : readFailure(listRead) ? (
         <div className="kf-card rounded-xl p-6 text-center">
           <ReadFailureNote read={listRead} onRetry={() => { void load(); }} className="text-sm text-muted-foreground" />
         </div>
@@ -203,7 +226,7 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
           title="No recurring expenses"
           description="Set up recurring expenses for rent, subscriptions, salaries, and other regular payments."
           actionLabel="Add Recurring Expense"
-          onAction={() => { setEditing(null); setShowBuilder(true); }}
+          onAction={() => { setEditing(null); openBuilder(); }}
         />
       ) : (
         <div className="space-y-2">
@@ -213,7 +236,7 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
               item={item}
               businessId={businessId}
               categories={categories}
-              onEdit={() => { setEditing(item); setShowBuilder(true); }}
+              onEdit={() => { setEditing(item); openBuilder(); }}
               onCancel={() => handleCancel(item.id)}
               onRunNow={() => handleRunNow(item.id)}
             />
@@ -232,7 +255,7 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
             saving={saving}
             categories={categories}
             editing={editing}
-            onClose={() => { setShowBuilder(false); setEditing(null); }}
+            onClose={() => { setBuilderOpen(null); setEditing(null); }}
             onSave={handleSave}
           />
         )}

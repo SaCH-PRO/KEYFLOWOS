@@ -219,6 +219,22 @@ export default function ExpensesInboxPage() {
   // R27-3: leaving the Recurring view forgets its list read, so on return the first render offers no "New recurring
   // expense" from the earlier visit's answer (reset during render, before the panel can report).
   if (view !== "recurring" && recurringRead.kind !== "loading") setRecurringRead({ kind: "loading" });
+  // P254 R6-2: and while the expenses read is not ok the panel is not mounted (each reload unmounts it), so its list is
+  // read again when it remounts: until it answers, no New is offered from the earlier list's answer.
+  if (d.read.kind !== "ok" && recurringRead.kind !== "loading") setRecurringRead({ kind: "loading" });
+  // P254 R3-2: a New request is for the business it was pressed under, so it is forgotten in the render that shows a new
+  // business (directly or via none). The panel itself opens its builder only on a change of triggerNew while it is
+  // mounted, for the business and generation it was pressed under (R5-1, R6-1); this reset is belt-and-braces.
+  const [triggerBusiness, setTriggerBusiness] = useState(d.businessId);
+  if (triggerBusiness !== d.businessId) {
+    setTriggerBusiness(d.businessId);
+    setRecurringTrigger(0);
+    // P254 R5-2: and the earlier business's list answer, so no commit offers New on B before B's list answers.
+    // Belt-and-braces (P254 R10): R6-2's reset above covers every business change, because adopt() in
+    // use-expenses-data sets the read (loading, or no-business) together with the business, so a render with a new
+    // business never has an ok read. Pinned by "after A -> B, B never offers New on A's list answer".
+    setRecurringRead({ kind: "loading" });
+  }
   // EXPENSES-HUB-3: "Upload receipts" was a button with no handler. A receipt goes up through the one presigned
   // upload (hooks/use-upload.ts) and opens Add expense with it attached; saving writes it to Expense.receiptUrl.
   const { uploadFile, isUploading: uploadingReceipt } = useUpload();
