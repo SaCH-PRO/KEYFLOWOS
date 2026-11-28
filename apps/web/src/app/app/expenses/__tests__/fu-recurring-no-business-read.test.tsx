@@ -295,3 +295,81 @@ describe("P254 R4-2: a New and a business change in the same commit", () => {
     expect(await screen.findByRole("dialog", {}, LONG)).toBeTruthy();
   });
 });
+
+describe("P254 R5-1: the panel remounted with the business unchanged opens no builder until New is pressed again", () => {
+  const announce = (bid: string | null) => {
+    ws.bid = bid;
+    window.dispatchEvent(new CustomEvent("kf:business-changed", { detail: { businessId: bid } }));
+  };
+  /** On A's Recurring view: New pressed, the builder opened, then cancelled. */
+  async function newThenCancelOnA() {
+    render(<ExpensesInboxPage />);
+    await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalledWith("biz_A", expect.anything()), LONG);
+    fireEvent.click(await screen.findByRole("tab", { name: "Recurring" }, LONG));
+    fireEvent.click(await screen.findByRole("button", { name: /New recurring expense/ }, LONG));
+    expect(await screen.findByRole("dialog", {}, LONG)).toBeTruthy();
+    const dialog = screen.getByRole("dialog");
+    // The builder's own Cancel (the last in the dialog; the sheet's header has its own close).
+    fireEvent.click(Array.from(dialog.querySelectorAll("button")).filter((b) => b.textContent?.trim() === "Cancel").at(-1)!);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull(), LONG);
+  }
+  async function noBuilderThenNewOpens(listReads: number) {
+    await waitFor(() => expect(client.fetchRecurringExpenses.mock.calls.length).toBeGreaterThan(listReads), LONG);
+    const again = await screen.findByRole("button", { name: /New recurring expense/ }, LONG);
+    await settle();
+    await settle();
+    expect(screen.queryByRole("dialog"), "the builder opened on a remount, without a click").toBeNull();
+    fireEvent.click(again);
+    expect(await screen.findByRole("dialog", {}, LONG), "control: New pressed after the remount opens the builder").toBeTruthy();
+  }
+  it("New on A, then A -> B -> A in one batch", async () => {
+    await newThenCancelOnA();
+    const listReads = client.fetchRecurringExpenses.mock.calls.length;
+    act(() => { announce("biz_B"); announce("biz_A"); });
+    await noBuilderThenNewOpens(listReads);
+  }, 30000);
+  it("New on A, then the expenses read fails, then Try again answers", async () => {
+    await newThenCancelOnA();
+    const listReads = client.fetchRecurringExpenses.mock.calls.length;
+    client.fetchExpenses.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    act(() => { announce("biz_B"); announce("biz_A"); });
+    expect(await screen.findByText("Couldn't load expenses.", {}, LONG)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await noBuilderThenNewOpens(listReads);
+  }, 30000);
+});
+
+function deferred<T>() {
+  let resolve: (v: T) => void = () => {};
+  const promise = new Promise<T>((res) => { resolve = res; });
+  return { promise, resolve };
+}
+describe("P254 R5-2: after A -> B, B never offers New on A's list answer", () => {
+  it("no 'New recurring expense' appears on B before B's list answers", async () => {
+    const heldB = deferred<unknown>();
+    client.fetchRecurringExpenses.mockImplementation((b: string) => (b === "biz_A" ? Promise.resolve(ok([SCHEDULE])) : heldB.promise));
+    render(<ExpensesInboxPage />);
+    await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalledWith("biz_A", expect.anything()), LONG);
+    fireEvent.click(await screen.findByRole("tab", { name: "Recurring" }, LONG));
+    expect(await screen.findByRole("button", { name: /New recurring expense/ }, LONG)).toBeTruthy();
+    // Every node the page adds from here is checked, so a New offered for one commit is seen.
+    let offered = false;
+    const seen = new MutationObserver((records) => {
+      for (const r of records) for (const n of Array.from(r.addedNodes)) {
+        if (n instanceof HTMLElement && /New recurring expense/.test(n.textContent ?? "")) offered = true;
+      }
+    });
+    seen.observe(document.body, { childList: true, subtree: true });
+    ws.bid = "biz_B";
+    act(() => { window.dispatchEvent(new CustomEvent("kf:business-changed", { detail: { businessId: "biz_B" } })); });
+    await waitFor(() => expect(client.fetchRecurringExpenses).toHaveBeenCalledWith("biz_B"), LONG);
+    await settle();
+    await settle();
+    seen.disconnect();
+    expect(offered, "B offered New on A's list answer").toBe(false);
+    expect(screen.queryByRole("button", { name: /New recurring expense/ })).toBeNull();
+    // Control: B's list answers, and New is offered.
+    await act(async () => { heldB.resolve(ok([])); });
+    expect(await screen.findByRole("button", { name: /New recurring expense/ }, LONG)).toBeTruthy();
+  }, 30000);
+});
