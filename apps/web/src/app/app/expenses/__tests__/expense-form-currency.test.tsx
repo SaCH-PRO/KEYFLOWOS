@@ -1,4 +1,7 @@
 /**
+ * R22: ExpenseFormModal is retired (it had no production mount); its tests in this file were removed. The R22
+ * PROGRESS on #273 names the side-sheet test that covers each.
+ *
  * FOLLOW3-B4-EXPENSE-CURRENCY-CENTS (V1-82; VL-06) — the expense forms never
  * name a currency; the server defaults an expense to the business currency.
  *
@@ -36,7 +39,6 @@ vi.mock("@/lib/client", () => ({
 }));
 
 import { toast } from "sonner";
-import { ExpenseFormModal } from "../components/expense-form-modal";
 import { ExpenseFormSideSheet } from "../components/expense-form-sidesheet";
 
 const BUSINESS = "biz_b4_forms";
@@ -57,19 +59,21 @@ const EXISTING: Expense = {
   updatedAt: "2026-11-01T00:00:00.000Z",
 };
 
-type Form = "modal" | "sidesheet";
+type Form = "sidesheet"; // R22: the modal is retired
 
 function mount(form: Form, editing: Expense | null) {
+  // The sheet saves only for the business the workspace has chosen (EXPENSES-HUB-3 R16-3): this one.
+  window.localStorage.setItem("kf_business_id", BUSINESS);
   const onSaved = vi.fn();
   const onClose = vi.fn();
   const props = { businessId: BUSINESS, categories: [], editingExpense: editing, onClose, onSaved };
-  render(form === "modal" ? <ExpenseFormModal {...props} /> : <ExpenseFormSideSheet {...props} />);
+  render(<ExpenseFormSideSheet {...props} />);
   return { onSaved, onClose };
 }
 
 function submitLabel(form: Form, editing: boolean): string {
   if (!editing) return "Add Expense";
-  return form === "modal" ? "Update" : "Update Expense";
+  return "Update Expense";
 }
 
 beforeEach(() => {
@@ -83,7 +87,7 @@ afterEach(() => {
   cleanup();
 });
 
-describe.each<Form>(["modal", "sidesheet"])("FOLLOW3-B4: the %s sends no currency; the server defaults it", (form) => {
+describe.each<Form>(["sidesheet"])("FOLLOW3-B4: the %s sends no currency; the server defaults it", (form) => {
   it("create: createExpense is called with a payload that has no `currency` key", async () => {
     mount(form, null);
     fireEvent.change(screen.getByPlaceholderText("What was this expense for?"), { target: { value: "Domain renewal" } });

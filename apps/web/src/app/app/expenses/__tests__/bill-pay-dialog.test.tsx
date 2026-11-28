@@ -68,9 +68,12 @@ vi.mock("next/navigation", () => ({
   redirect: vi.fn(),
   notFound: vi.fn(),
 }));
+// EXPENSES-HUB-3 R18-6: Pay starts only for the stored business, so a test that re-renders the dialog for another
+// business moves the stored id first, as a switch does in the app.
+const stored = vi.hoisted(() => ({ id: "biz_hub1_pay" }));
 vi.mock("@/lib/workspace", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  getStoredBusinessId: () => BUSINESS,
+  getStoredBusinessId: () => stored.id,
 }));
 vi.mock("@/hooks/use-upload", () => ({ useUpload: () => ({ uploadFile: vi.fn(), isUploading: false, progress: 0 }) }));
 vi.mock("@/hooks/use-drive-upload", () => ({ useDriveUpload: () => ({ uploadToDrive: vi.fn(async () => true) }) }));
@@ -168,6 +171,7 @@ async function openPay() {
 }
 
 afterEach(() => {
+  stored.id = BUSINESS;
   cleanup();
   vi.unstubAllGlobals();
   vi.mocked(toast.success).mockReset();
@@ -380,6 +384,7 @@ describe("EXPENSES-HUB-1: paying a bill asks which account and method (D-168, BU
     const first = (await screen.findByRole("combobox", { name: /pay from/i })) as HTMLSelectElement;
     expect(first.value).toBe("fa_cash");
 
+    stored.id = OTHER; // the switch that re-renders the dialog for OTHER
     rerender(<BillPayDialog businessId={OTHER} {...props} />);
     const dialog = payDialog();
     expect(within(dialog).queryByRole("combobox", { name: /pay from/i })).toBeNull();
@@ -505,6 +510,7 @@ describe("EXPENSES-HUB-1: paying a bill asks which account and method (D-168, BU
     fireEvent.click(screen.getByRole("button", { name: /^Pay/ }));
     await waitFor(() => expect(within(payDialog()).getByText(words)).toBeTruthy());
 
+    stored.id = OTHER; // the switch that re-renders the dialog for OTHER
     rerender(<BillPayDialog businessId={OTHER} {...props} />);
     await within(payDialog()).findByRole("combobox", { name: /pay from/i });
     expect(within(payDialog()).queryByText(words)).toBeNull();

@@ -1,23 +1,37 @@
 "use client";
 
+import { ReadFailureNote, readFailure } from "./read-failure-note";
+import type { BlockRead } from "./use-expenses-data";
 import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
-import { Plus, Palette, X, TrendingUp, TrendingDown, Minus, Receipt, Target, AlertTriangle } from "lucide-react";
+import { Plus, Palette, X, Receipt, Target } from "lucide-react";
 import { toast } from "sonner";
 import { ExpenseCategory, ExpenseBudget, ExpenseSummary, createExpenseCategory, deleteExpenseCategory } from "@/lib/client";
-import { CATEGORY_COLORS, formatCurrency } from "./expense-utils";
+import { useRefusal } from "@/lib/failure-kit";
+import { CATEGORY_COLORS, formatCurrency, refusedStart, canStartFor } from "./expense-utils";
 
 interface ExpenseCategoriesTabProps {
   businessId: string;
   categories: ExpenseCategory[];
-  setCategories: React.Dispatch<React.SetStateAction<ExpenseCategory[]>>;
+  /** R11-1: the data hook's guarded writers; a reply for a business no longer shown writes and says nothing. */
+  isCurrentBusiness: (businessId: string) => boolean;
+  addCategory: (businessId: string, category: ExpenseCategory) => boolean;
+  removeCategory: (businessId: string, categoryId: string) => boolean;
   summary: ExpenseSummary | null;
   budgets: ExpenseBudget[];
+  /** R24b: the categories read's own state: a refused one is said, never shown as "No categories yet". */
+  categoriesRead?: BlockRead;
+  onRetry?: () => void;
 }
 
-export function ExpenseCategoriesTab({ businessId, categories, setCategories, summary, budgets }: ExpenseCategoriesTabProps) {
+export function ExpenseCategoriesTab({ businessId, categories, isCurrentBusiness, addCategory, removeCategory, summary, budgets, categoriesRead, onRetry }: ExpenseCategoriesTabProps) {
   const [newCatName, setNewCatName] = useState("");
   const [newCatColor, setNewCatColor] = useState(CATEGORY_COLORS[0]);
+  // EXPENSES-HUB-3: the client answers a refused create as { error } and does not throw; it used to say
+  // "Category created" anyway. A refusal says why and keeps what was typed.
+  const { refused } = useRefusal();
+  // R19-5: every reply is judged by the start check's test (the given check, and the stored id).
+  const live = () => canStartFor(businessId, isCurrentBusiness);
 
   const categoryData = useMemo(() => {
     return categories.map(cat => {
@@ -25,16 +39,13 @@ export function ExpenseCategoriesTab({ businessId, categories, setCategories, su
       const budget = budgets.find(b => b.category?.id === cat.id || b.categoryId === cat.id);
       const total = catSummary?.total ?? 0;
       const prevTotal = catSummary?.prevTotal ?? 0;
-      const changePct = prevTotal > 0 ? ((total - prevTotal) / prevTotal) * 100 : total > 0 ? 100 : 0;
-      const isAnomaly = changePct > 50 && total > 100;
-      const isSaving = changePct < -20 && prevTotal > 100;
+      // EXPENSES-HUB-3 (COR MINOR-3): no trend is computed here. The browser made "Spike +100%" from a previous
+      // total of 0 (the server says 0), and "spike" and "saved" from thresholds the server never set; the server's
+      // totals for this period and the last are shown as they are.
       return {
         ...cat,
         total,
         prevTotal,
-        changePct,
-        isAnomaly,
-        isSaving,
         percent: catSummary?.percent ?? 0,
         txCount: cat._count?.expenses ?? 0,
         budget: budget ?? null,
@@ -43,56 +54,57 @@ export function ExpenseCategoriesTab({ businessId, categories, setCategories, su
   }, [categories, summary, budgets]);
 
   const maxTotal = categoryData.length > 0 ? Math.max(...categoryData.map(c => Math.max(c.total, c.prevTotal)), 1) : 1;
-  const anomalyCount = categoryData.filter(c => c.isAnomaly).length;
-  const savingCount = categoryData.filter(c => c.isSaving).length;
 
   const handleAddCategory = async () => {
     if (!newCatName.trim()) return;
+    if (refusedStart(businessId, isCurrentBusiness)) return;
     try {
       const res = await createExpenseCategory(businessId, { name: newCatName.trim(), color: newCatColor });
-      if (res.data) setCategories(prev => [...prev, res.data!]);
+      // R11-1: answered after a switch to another business: nothing is added there and nothing is said.
+      if (!live()) return;
+      if (refused(res, { what: "add expense categories" })) return;
+      if (!res.data) { toast.error("Failed to create category"); return; }
+      if (!addCategory(businessId, res.data)) return;
       setNewCatName(""); setNewCatColor(CATEGORY_COLORS[0]);
       toast.success("Category created");
-    } catch { toast.error("Failed to create category"); }
+    } catch { if (live()) toast.error("Failed to create category"); }
   };
 
   const handleDeleteCategory = async (categoryId: string) => {
-    try { await deleteExpenseCategory(businessId, categoryId); setCategories(prev => prev.filter(c => c.id !== categoryId)); toast.success("Category deleted"); } catch { toast.error("Failed to delete category"); }
+    if (refusedStart(businessId, isCurrentBusiness)) return;
+    try {
+      const res = await deleteExpenseCategory(businessId, categoryId);
+      // R11-2: answered after a switch to another business: nothing is removed there and nothing is said.
+      if (!live()) return;
+      if (refused(res, { what: "delete expense categories" })) return;
+      if (!removeCategory(businessId, categoryId)) return;
+      toast.success("Category deleted");
+    } catch { if (live()) toast.error("Failed to delete category"); }
   };
 
   return (
     <div className="space-y-6">
-      {(anomalyCount > 0 || savingCount > 0) && (
-        <div className="flex items-center gap-2 flex-wrap">
-          {anomalyCount > 0 && (
-            <span className="text-[10px] px-2 py-1 rounded-full font-medium flex items-center gap-1" style={{ background: "hsl(var(--kf-warning) / 0.12)", color: "hsl(var(--kf-warning))" }}>
-              <AlertTriangle className="w-3 h-3" />
-              {anomalyCount} spending spike{anomalyCount > 1 ? "s" : ""} detected
-            </span>
-          )}
-          {savingCount > 0 && (
-            <span className="text-[10px] px-2 py-1 rounded-full font-medium flex items-center gap-1" style={{ background: "hsl(var(--kf-success) / 0.12)", color: "hsl(var(--kf-success))" }}>
-              <TrendingDown className="w-3 h-3" />
-              {savingCount} categor{savingCount > 1 ? "ies" : "y"} trending down
-            </span>
-          )}
-        </div>
-      )}
-
+      {/* R25-7: no Add while the list could not be read: a new category would land beside ones nobody can see. */}
+      {!readFailure(categoriesRead) && (
       <div className="kf-card rounded-xl p-4 space-y-4">
         <h3 className="text-sm font-semibold flex items-center gap-2"><Palette className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />Create Category</h3>
         <div className="flex items-center gap-2 flex-wrap">
-          <input placeholder="Category name..." value={newCatName} onChange={e => setNewCatName(e.target.value)} onKeyDown={e => e.key === "Enter" && handleAddCategory()} className="flex-1 min-w-[140px] bg-transparent border border-border/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]" />
+          <input placeholder="Category name..." aria-label="Category name" value={newCatName} onChange={e => setNewCatName(e.target.value)} onKeyDown={e => e.key === "Enter" && handleAddCategory()} className="flex-1 min-w-[140px] bg-transparent border border-border/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]" />
           <div className="flex items-center gap-1">
             {CATEGORY_COLORS.map(c => (
-              <button key={c} onClick={() => setNewCatColor(c)} className="w-5 h-5 rounded-full transition-transform" style={{ background: c, transform: newCatColor === c ? "scale(1.3)" : "scale(1)", boxShadow: newCatColor === c ? `0 0 0 2px ${c}40` : "none" }} />
+              <button key={c} onClick={() => setNewCatColor(c)} aria-label={`Colour ${c}`} aria-pressed={newCatColor === c} className="w-5 h-5 rounded-full transition-transform" style={{ background: c, transform: newCatColor === c ? "scale(1.3)" : "scale(1)", boxShadow: newCatColor === c ? `0 0 0 2px ${c}40` : "none" }} />
             ))}
           </div>
-          <button onClick={handleAddCategory} disabled={!newCatName.trim()} className="kf-btn-primary px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"><Plus className="w-4 h-4" /></button>
+          <button onClick={handleAddCategory} disabled={!newCatName.trim()} aria-label="Add category" className="kf-btn-primary px-4 py-2 min-h-[44px] sm:min-h-0 rounded-lg text-sm font-medium disabled:opacity-40"><Plus className="w-4 h-4" /></button>
         </div>
       </div>
+      )}
 
-      {categoryData.length > 0 ? (
+      {readFailure(categoriesRead) ? (
+        <div className="kf-card rounded-xl p-8 text-center">
+          <ReadFailureNote read={categoriesRead} onRetry={onRetry} className="text-sm text-muted-foreground" />
+        </div>
+      ) : categoryData.length > 0 ? (
         <div className="kf-card rounded-xl overflow-hidden">
           <div className="p-4 border-b border-border/40">
             <h3 className="text-sm font-semibold flex items-center gap-2">
@@ -123,18 +135,6 @@ export function ExpenseCategoriesTab({ businessId, categories, setCategories, su
                           {cat.budget.percentUsed}% of {formatCurrency(cat.budget.amount)}
                         </span>
                       )}
-                      {cat.isAnomaly && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full flex items-center gap-0.5 font-medium" style={{ background: "hsl(var(--kf-warning) / 0.12)", color: "hsl(var(--kf-warning))" }}>
-                          <AlertTriangle className="w-2.5 h-2.5" />
-                          Spike +{cat.changePct.toFixed(0)}%
-                        </span>
-                      )}
-                      {cat.isSaving && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full flex items-center gap-0.5 font-medium" style={{ background: "hsl(var(--kf-success) / 0.12)", color: "hsl(var(--kf-success))" }}>
-                          <TrendingDown className="w-2.5 h-2.5" />
-                          {Math.abs(cat.changePct).toFixed(0)}% saved
-                        </span>
-                      )}
                     </div>
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
@@ -159,15 +159,11 @@ export function ExpenseCategoriesTab({ businessId, categories, setCategories, su
                             />
                           </div>
                           <span className="text-[10px] text-muted-foreground w-28 text-right">prev: {formatCurrency(cat.prevTotal)}</span>
-                          <span className="text-[10px] w-10 text-right flex items-center justify-end gap-0.5" style={{ color: cat.changePct > 0 ? "hsl(var(--kf-error))" : cat.changePct < 0 ? "hsl(var(--kf-success))" : undefined }}>
-                            {cat.changePct > 0 ? <TrendingUp className="w-2.5 h-2.5" /> : cat.changePct < 0 ? <TrendingDown className="w-2.5 h-2.5" /> : <Minus className="w-2.5 h-2.5" />}
-                            {Math.abs(cat.changePct).toFixed(0)}%
-                          </span>
                         </div>
                       )}
                     </div>
                   </div>
-                  <button onClick={() => handleDeleteCategory(cat.id)} className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-red-500/20 text-muted-foreground hover:text-red-400 transition-all"><X className="w-3.5 h-3.5" /></button>
+                  <button onClick={() => handleDeleteCategory(cat.id)} aria-label={`Delete category ${cat.name}`} className="sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 p-1.5 rounded-lg hover:bg-red-500/20 text-muted-foreground hover:text-red-400 transition-all"><X className="w-3.5 h-3.5" /></button>
                 </div>
               </motion.div>
             ))}
@@ -177,7 +173,7 @@ export function ExpenseCategoriesTab({ businessId, categories, setCategories, su
         <div className="kf-card rounded-xl p-8 text-center space-y-2">
           <Palette className="w-8 h-8 mx-auto text-muted-foreground/30" />
           <p className="text-sm font-medium">No categories yet</p>
-          <p className="text-xs text-muted-foreground">Create categories above to unlock spending breakdowns, budget tracking, and smarter AI insights.</p>
+          <p className="text-xs text-muted-foreground">Create categories above to sort your expenses and set budgets.</p>
         </div>
       )}
 
@@ -190,7 +186,6 @@ export function ExpenseCategoriesTab({ businessId, categories, setCategories, su
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
             {summary.byCategory.slice(0, 6).map(cat => {
               const budget = budgets.find(b => b.category?.id === cat.categoryId || b.categoryId === cat.categoryId);
-              const changePct = cat.prevTotal > 0 ? ((cat.total - cat.prevTotal) / cat.prevTotal) * 100 : 0;
               return (
                 <div key={cat.categoryId} className="bg-white/5 rounded-lg p-3 space-y-1.5">
                   <div className="flex items-center gap-2">
@@ -208,12 +203,6 @@ export function ExpenseCategoriesTab({ businessId, categories, setCategories, su
                       <span className="text-muted-foreground/50">No budget</span>
                     )}
                   </div>
-                  {changePct !== 0 && (
-                    <div className="flex items-center gap-1 text-[10px]" style={{ color: changePct > 0 ? "hsl(var(--kf-error))" : "hsl(var(--kf-success))" }}>
-                      {changePct > 0 ? <TrendingUp className="w-2.5 h-2.5" /> : <TrendingDown className="w-2.5 h-2.5" />}
-                      {changePct > 0 ? "+" : ""}{changePct.toFixed(0)}% vs prev period
-                    </div>
-                  )}
                 </div>
               );
             })}

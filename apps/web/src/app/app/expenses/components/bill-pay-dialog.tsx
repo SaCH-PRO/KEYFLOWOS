@@ -19,7 +19,7 @@ import { fetchFinanceAccounts, PAYMENT_METHODS, type Expense, type FinancialAcco
 import { payBill } from "@/lib/api/finance";
 import { toast } from "sonner";
 import { readState, refusalMessage } from "@/lib/failure-kit";
-import { formatCurrency } from "./expense-utils";
+import { canStartFor, formatCurrency, refusedStart, useShownBusiness } from "./expense-utils";
 
 const FOCUSABLE = "select:not([disabled]), button:not([disabled]), input:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex='-1'])";
 
@@ -52,12 +52,19 @@ export function BillPayDialog({
   bill,
   onClose,
   onPaid,
+  isCurrentBusiness: hookCheck,
 }: {
   businessId: string;
   bill: Expense;
   onClose: () => void;
   onPaid: (paid: Expense | null) => void;
+  /** R14: the parent's check that the business this bill is for is still the one shown (fallback: this prop's own). */
+  isCurrentBusiness?: (businessId: string) => boolean;
 }) {
+  const shownCheck = useShownBusiness(businessId);
+  const isCurrentBusiness = hookCheck ?? shownCheck;
+  // R19-5: every reply is judged by the start check's test (the given check, and the stored id).
+  const live = () => canStartFor(businessId, isCurrentBusiness);
   // Bumped by Retry: reads the accounts again.
   const [attempt, setAttempt] = useState(0);
   // Each read's answer and the account chosen from it are kept with the read they belong to (this business, this
@@ -156,6 +163,13 @@ export function BillPayDialog({
   // loading or failed, not only the disabled button.
   const pay = async () => {
     if (inFlight.current || !canPay) return;
+    // R15-1 / R18-6 / R19-3: the shared start check (the stored id, and the given check). Another tab's switch can
+    // reach the stored id before its storage event reaches this tab: nothing is paid for the business no longer
+    // chosen, the dialog for it closes, and the refusal says why (the business changed, or it could not be read).
+    if (refusedStart(businessId, isCurrentBusiness)) {
+      onClose();
+      return;
+    }
     inFlight.current = true;
     setBusy(true);
     setSaid(null);
@@ -169,11 +183,13 @@ export function BillPayDialog({
       const body: { paymentAccountId?: string; paymentMethod: string } = { paymentMethod: method };
       if (accounts.kind === "ok" && accountId) body.paymentAccountId = accountId;
       const res = await payBill(businessId, bill.id, body);
+      // R14: a pay that answers after a switch to another business says nothing there and reports nothing paid.
+      if (!live()) return;
       const refusal = refusalMessage(res, { what: "pay this bill" });
       if (refusal !== null) refused(refusal);
       else onPaid(res.data ?? null);
     } catch {
-      refused("Couldn't pay this bill.");
+      if (live()) refused("Couldn't pay this bill.");
     } finally {
       inFlight.current = false;
       setBusy(false);
