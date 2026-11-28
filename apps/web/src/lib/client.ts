@@ -6057,18 +6057,6 @@ export async function fetchExpensesByProject(businessId: string, projectId: stri
 export async function fetchExpensesByService(businessId: string, serviceId: string): Promise<ApiResult<{ expenses: Expense[]; total: number; count: number }>> {
   return apiGetSimple<{ expenses: Expense[]; total: number; count: number }>(`/expenses/businesses/${encodeURIComponent(businessId)}/expenses/by-service/${encodeURIComponent(serviceId)}`);
 }
-export interface RecurringCandidate {
-  vendor: string;
-  amount: number;
-  description: string;
-  occurrences: number;
-  avgDaysBetween: number;
-  frequency: string;
-  expenseIds: string[];
-}
-export async function fetchRecurringCandidates(businessId: string): Promise<ApiResult<{ candidates: RecurringCandidate[] }>> {
-  return apiGetSimple<{ candidates: RecurringCandidate[] }>(`/expenses/businesses/${encodeURIComponent(businessId)}/expenses/recurring-candidates`);
-}
 export async function fetchVendorAnalytics(businessId: string, period = '30d', startDate?: string, endDate?: string): Promise<ApiResult<VendorAnalytics[]>> {
   const q = new URLSearchParams({ period });
   if (startDate) q.set('startDate', startDate);
