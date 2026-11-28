@@ -3,7 +3,7 @@
 import { ReadFailureNote, readFailure } from "./read-failure-note";
 import { readState } from "@/lib/failure-kit";
 import type { BlockRead } from "./use-expenses-data";
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useLayoutEffect, useRef } from "react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -100,13 +100,17 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
   }, [businessId, isCurrentBusiness]);
 
   useEffect(() => { queueMicrotask(load); }, [load]);
-  // P254 R1-2: a New request opens the builder only for a business. The business is read through a ref so a business
-  // change alone never reopens the builder (COR MINOR-6: it opens only on a new click).
-  const builderBusiness = useRef(businessId);
-  useEffect(() => { builderBusiness.current = businessId; }, [businessId]);
-  // The ref sync above must stay before this effect, so a New and a business change in one commit
-  // read the new business. P254 R4-1: the open is queued, so it opens only if the business is still the one the New
-  // was made for (a second commit in the same task may change it before the microtask runs).
+  // P254 R1-2 / R4-1 / R5-3: a New opens the builder only for the business it was pressed under, and only while that
+  // business is still the one shown, with no switch in between. The business is held in a ref (a business change alone
+  // never reopens the builder, COR MINOR-6), replaced by a new object on every change, and synced in a LAYOUT effect: it
+  // is current from the commit that shows the new business, before any passive effect and so before the queued open
+  // can fire (a passive sync left a window, after the next business committed, where the open still read the old one).
+  // The open compares the object it captured, so A -> B -> A before it fires also opens nothing. Layout effects run
+  // before passive ones, so a New and a business change in one commit read the new business.
+  const builderFor = useRef<{ business: string | null }>({ business: businessId });
+  useLayoutEffect(() => {
+    if (builderFor.current.business !== businessId) builderFor.current = { business: businessId };
+  }, [businessId]);
   // P254 R5-1: the builder opens only on a change of triggerNew while this panel is mounted, never on the value it
   // mounted with: the page unmounts the panel on every reload (a failed read and its Try again, A -> B -> A in one
   // batch), and a New pressed before that must not open the builder again unprompted. The last value seen is kept, so
@@ -117,10 +121,10 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
     const before = seenTrigger.current;
     seenTrigger.current = triggerNew;
     if (triggerNew === before) return;
-    const forBusiness = builderBusiness.current;
-    if (triggerNew && forBusiness) {
+    const at = builderFor.current;
+    if (triggerNew && at.business) {
       queueMicrotask(() => {
-        if (builderBusiness.current !== forBusiness) return;
+        if (builderFor.current !== at) return;
         setEditing(null);
         setShowBuilder(true);
       });
