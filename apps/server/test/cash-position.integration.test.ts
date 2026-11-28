@@ -421,9 +421,26 @@ function numbersIn(value: any, at = '$'): Array<[string, number]> {
   return [];
 }
 
-/** Serialize an HTTP 403 refusal body for cash-figure leak checks (CP-28b). */
+const ISO_UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/;
+const UUID_CORRELATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Serialize an HTTP 403 refusal body for cash-figure leak checks (CP-28b).
+ * Strips only strictly-validated envelope metadata (`timestamp`, `correlationId`)
+ * so a wall-clock `.550Z` millisecond or hex UUID never false-positives on `/550/`.
+ */
 function refusalBodyText(body: unknown): string {
-  return JSON.stringify(body);
+  if (!body || typeof body !== 'object' || Array.isArray(body) || Buffer.isBuffer(body)) {
+    return JSON.stringify(body);
+  }
+  const rest: Record<string, unknown> = { ...(body as Record<string, unknown>) };
+  if (typeof rest.timestamp === 'string' && ISO_UTC_TIMESTAMP.test(rest.timestamp)) {
+    delete rest.timestamp;
+  }
+  if (typeof rest.correlationId === 'string' && UUID_CORRELATION_ID.test(rest.correlationId)) {
+    delete rest.correlationId;
+  }
+  return JSON.stringify(rest);
 }
 
 /** V1-37c: a balanced posting through the door in `currency` (sourced, so D-13 lets another supported currency through). */
