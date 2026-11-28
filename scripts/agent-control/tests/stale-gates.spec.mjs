@@ -221,7 +221,7 @@ test('TOF-STALE-GATES-PKT: a same-repo pkt/* PR with a stale gate is assessed, w
       pr(209, 'impl-foo/not-gated', 'c'.repeat(40)),
     ],
     compare: {
-      [PKT_SHA]: { ahead_by: 2, files: [{ filename: 'apps/server/src/app.module.ts' }] },
+      [PKT_SHA]: { ahead_by: 2, files: [{ filename: 'apps/server/x.ts' }] },
       [PKT_CUR_SHA]: { ahead_by: 0, files: [] },
       [SHA1]: { ahead_by: 0, files: [] },
     },
