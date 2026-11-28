@@ -32,33 +32,35 @@ export function stripComments(src) {
   let regexInClass = false;
   let prevSigChar = '';
   let prevWord = '';
+  let wordBoundary = true;
   while (i < n) {
     const c = src[i];
     const next = i + 1 < n ? src[i + 1] : '';
     if (state === 'code') {
-      if (c === '/' && next === '/') { state = 'line'; out[i] = ' '; out[i + 1] = ' '; i += 2; continue; }
-      if (c === '/' && next === '*') { state = 'block'; out[i] = ' '; out[i + 1] = ' '; i += 2; continue; }
+      if (c === '/' && next === '/') { state = 'line'; wordBoundary = true; out[i] = ' '; out[i + 1] = ' '; i += 2; continue; }
+      if (c === '/' && next === '*') { state = 'block'; wordBoundary = true; out[i] = ' '; out[i + 1] = ' '; i += 2; continue; }
       if (c === '/' && isRegexStart(src, i, prevSigChar, prevWord)) {
         state = 'regex';
         regexInClass = false;
         prevSigChar = '/';
         prevWord = '';
+        wordBoundary = true;
         i++;
         continue;
       }
-      if (c === "'") { state = 'sq'; prevSigChar = "'"; prevWord = ''; }
-      else if (c === '"') { state = 'dq'; prevSigChar = '"'; prevWord = ''; }
-      else if (c === '`') { state = 'tpl'; prevSigChar = '`'; prevWord = ''; }
+      if (c === "'") { state = 'sq'; prevSigChar = "'"; prevWord = ''; wordBoundary = true; }
+      else if (c === '"') { state = 'dq'; prevSigChar = '"'; prevWord = ''; wordBoundary = true; }
+      else if (c === '`') { state = 'tpl'; prevSigChar = '`'; prevWord = ''; wordBoundary = true; }
       else if (/[A-Za-z0-9_$]/.test(c)) {
-        prevWord += c;
+        prevWord = wordBoundary ? c : prevWord + c;
+        wordBoundary = false;
         prevSigChar = c;
       } else if (!/\s/.test(c)) {
         prevSigChar = c;
         prevWord = '';
-      } else if (c === '\n' && prevSigChar === '') {
-        prevWord = '';
-      } else if (/\s/.test(c) && prevWord) {
-        // Keep prevWord until next non-whitespace token decides whether `/` follows a keyword
+        wordBoundary = true;
+      } else {
+        wordBoundary = true;
       }
       i++;
       continue;
@@ -77,10 +79,10 @@ export function stripComments(src) {
     }
     if (state === 'regex') {
       if (c === '\\') { i += 2; continue; }
-      if (c === '\n') { state = 'code'; regexInClass = false; prevSigChar = '\n'; prevWord = ''; i++; continue; }
+      if (c === '\n') { state = 'code'; regexInClass = false; prevSigChar = '\n'; prevWord = ''; wordBoundary = true; i++; continue; }
       if (c === '[') { regexInClass = true; i++; continue; }
       if (c === ']' && regexInClass) { regexInClass = false; i++; continue; }
-      if (c === '/' && !regexInClass) { state = 'code'; prevSigChar = '/'; prevWord = ''; i++; continue; }
+      if (c === '/' && !regexInClass) { state = 'code'; prevSigChar = '/'; prevWord = ''; wordBoundary = true; i++; continue; }
       i++;
       continue;
     }
