@@ -2217,6 +2217,9 @@ describe('W11-CASH-READERS-LEDGER: the cashflow forecast and the money health sc
     expect(refusalBodyText({ ...cleanRefusalAt550Ms, otherCurrencyCash: [{ currency: 'USD', amount: 550 }] })).toMatch(/openingCash|otherCurrencyCash|550/);
     expect(refusalBodyText({ ...cleanRefusalAt550Ms, timestamp: '550' })).toMatch(/openingCash|otherCurrencyCash|550/);
     expect(refusalBodyText({ ...cleanRefusalAt550Ms, correlationId: 'leaked-550-usd' })).toMatch(/openingCash|otherCurrencyCash|550/);
+    expect(refusalBodyText(undefined)).toBe('');
+    expect(refusalBodyText(Buffer.from('USD 550'))).toMatch(/USD|runway|550/i);
+    expect(refusalBodyText(Buffer.from('USD 550'))).toMatch(/openingCash|otherCurrencyCash|550/);
   });
 
   // Orchestrator review M2: metrics.cashCurrency is named only when the business currency is a
