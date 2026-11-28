@@ -77,6 +77,8 @@ export interface ReflectionInsight {
   createdAt: Date;
   validatedAt?: Date;
   validationOutcome?: 'confirmed' | 'rejected' | null;
+  /** False for in-process-only entries (e.g., dreamJournal hypotheses not yet stored in DB). */
+  persisted?: boolean;
 }
 
 export interface DreamHypothesis {
@@ -130,13 +132,16 @@ export interface WeeklyInsightReport {
 const MEMORY_TYPE_SESSION = 'reflection_session';
 const MEMORY_TYPE_HYPOTHESIS = 'dream_hypothesis';
 
+/** Maximum in-process dream hypotheses retained per business (oldest dropped). */
+export const MAX_DREAM_HYPOTHESES_PER_BUSINESS = 100;
+
 /* ─────────────────────────── Service ─────────────────────────── */
 
 @Injectable()
 export class KeyCortexReflectionService {
   private readonly logger = new Logger(KeyCortexReflectionService.name);
 
-  /** In-memory dream journal — also persisted to DB */
+  /** Bounded per-business in-process dream journal (oldest evicted past MAX_DREAM_HYPOTHESES_PER_BUSINESS). */
   private dreamJournal: Map<string, DreamHypothesis[]> = new Map();
 
   /** Active reflection sessions per business */
@@ -530,24 +535,30 @@ export class KeyCortexReflectionService {
       }
 
       /* 3. Update temporal memory indices */
-      const indicesUpdated = await this.updateTemporalMemoryIndices(businessId);
-      actionsTaken.push(`Updated ${indicesUpdated} temporal memory indices`);
+      const temporalIndexResult = await this.updateTemporalMemoryIndices(businessId);
+      if (temporalIndexResult.ran) {
+        actionsTaken.push(`Updated ${temporalIndexResult.updated} temporal memory indices`);
+      } else {
+        actionsTaken.push(`Temporal memory index update not run: ${temporalIndexResult.reason}`);
+      }
 
       /* 4. Check data integrity */
-      const integrityIssues = await this.checkDataIntegrity(businessId);
-      if (integrityIssues.length > 0) {
+      const integrityResult = await this.checkDataIntegrity(businessId);
+      if (!integrityResult.ran) {
+        actionsTaken.push(`Data integrity check not run: ${integrityResult.reason}`);
+      } else if (integrityResult.issues.length > 0) {
         insights.push({
           id: uuidv4(),
           type: 'anomaly',
-          description: `Data integrity check found ${integrityIssues.length} issues`,
+          description: `Data integrity check found ${integrityResult.issues.length} issues`,
           confidence: 1.0,
-          dataPoints: integrityIssues,
+          dataPoints: integrityResult.issues,
           priority: 'critical',
           recommendedAction: 'Review and repair data integrity issues immediately',
           source: 'maintenance',
           createdAt: new Date(),
         });
-        actionsTaken.push(`Found ${integrityIssues.length} data integrity issues`);
+        actionsTaken.push(`Found ${integrityResult.issues.length} data integrity issues`);
       } else {
         actionsTaken.push('Data integrity check passed');
       }
@@ -569,8 +580,9 @@ export class KeyCortexReflectionService {
         metadata: {
           cleanedApprovals,
           archivedEvents,
-          indicesUpdated,
-          integrityIssuesFound: integrityIssues.length,
+          indicesUpdated: temporalIndexResult.ran ? temporalIndexResult.updated : null,
+          integrityChecked: integrityResult.ran,
+          integrityIssuesFound: integrityResult.ran ? integrityResult.issues.length : null,
           compactedRecords,
         },
       };
@@ -601,7 +613,7 @@ export class KeyCortexReflectionService {
     const persistedHypotheses: Array<Record<string, unknown>> = []; // persistence not implemented (model absent from schema)
 
     const allHypotheses = [
-      ...hypotheses,
+      ...hypotheses.map((h) => ({ ...h, persisted: false })),
       ...(persistedHypotheses ?? []).map((h: Record<string, unknown>) => ({
         id: (h as { id: string }).id,
         description: (h as { description: string }).description,
@@ -611,6 +623,7 @@ export class KeyCortexReflectionService {
         validatedAt: (h as { validatedAt?: Date }).validatedAt,
         evidenceFor: (h as { evidenceFor?: string[] }).evidenceFor,
         sources: (h as { sources: string[] }).sources,
+        persisted: true,
       })),
     ];
 
@@ -634,6 +647,7 @@ export class KeyCortexReflectionService {
       createdAt: h.createdAt,
       validatedAt: h.validatedAt,
       validationOutcome: h.status === 'confirmed' ? 'confirmed' : h.status === 'rejected' ? 'rejected' : null,
+      persisted: h.persisted,
     }));
   }
 
@@ -1226,17 +1240,18 @@ Return JSON array:
   }
 
   private async storeDreamHypotheses(businessId: string, hypotheses: DreamHypothesis[], parentDreamId: string): Promise<void> {
-    // Store in memory cache
+    // Store in bounded per-business in-process journal (oldest entries evicted past cap).
+    // D-257: new hypotheses are not written to KeyCortexMemory until T3 semantic memory ships.
     const existing = this.dreamJournal.get(businessId) ?? [];
     for (const h of hypotheses) {
       h.parentDreamId = parentDreamId;
     }
-    this.dreamJournal.set(businessId, [...existing, ...hypotheses]);
-
-    // Persist to database
-    for (const h of hypotheses) {
-      // persistence not implemented (model absent from schema); previously a no-op
-    }
+    const merged = [...existing, ...hypotheses];
+    const bounded =
+      merged.length > MAX_DREAM_HYPOTHESES_PER_BUSINESS
+        ? merged.slice(merged.length - MAX_DREAM_HYPOTHESES_PER_BUSINESS)
+        : merged;
+    this.dreamJournal.set(businessId, bounded);
   }
 
   private async scheduleHypothesisVerification(businessId: string, hypothesisId: string): Promise<void> {
@@ -1503,45 +1518,22 @@ ${report.topInsights.slice(0, 5).map((i) => `- ${i.description}`).join('\n')}`;
     return 0;
   }
 
-  private async updateTemporalMemoryIndices(businessId: string): Promise<number> {
-    // Update time-series indices for fast temporal queries
-    const now = new Date();
-    const periods = [
-      { label: '24h', since: new Date(now.getTime() - 24 * 60 * 60 * 1000) },
-      { label: '7d', since: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000) },
-      { label: '30d', since: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000) },
-      { label: '90d', since: new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000) },
-    ];
-
-    let updated = 0;
-    for (const period of periods) {
-      // KeyCortexEventService has no temporal index.
-      updated++;
-    }
-
-    return updated;
+  private async updateTemporalMemoryIndices(
+    _businessId: string,
+  ): Promise<{ ran: true; updated: number } | { ran: false; reason: string }> {
+    return { ran: false, reason: 'KeyCortexEventService has no temporal index' };
   }
 
-  private async checkDataIntegrity(businessId: string): Promise<string[]> {
-    const issues: string[] = [];
-
-      // Orphan detection needs KeyCortexInsight and KeyCortexReflectionSession,
-      // neither of which has a table. The raw query referenced relations that do
-      // not exist and could only ever have thrown into its catch.
-      const orphanedInsights: Array<{ count: bigint }> = [{ count: 0n }];
-    const orphanedCount = Number((orphanedInsights as Array<{ count: bigint }>)[0]?.count ?? 0);
-    if (orphanedCount > 0) {
-      issues.push(`${orphanedCount} orphaned insights found`);
-    }
-
-    // Check for null confidence scores
-    const nullConfidence = 0; // persistence not implemented (model absent from schema)
-
-    if (nullConfidence && nullConfidence > 0) {
-      issues.push(`${nullConfidence} insights with zero confidence`);
-    }
-
-    return issues;
+  private async checkDataIntegrity(
+    _businessId: string,
+  ): Promise<{ ran: true; issues: string[] } | { ran: false; reason: string; issues: string[] }> {
+    // Orphan and null-confidence checks require dedicated insight and reflection-session
+    // tables that are absent from schema.prisma. Report not-run honestly instead of 0 issues.
+    return {
+      ran: false,
+      reason: 'insight and reflection-session tables are absent from schema',
+      issues: [],
+    };
   }
 
   private async compactMemoryIfNeeded(businessId: string): Promise<number> {
