@@ -551,8 +551,10 @@ describe("P254 R7-1: a reload that goes from ok straight to failed (no loading b
     fireEvent.click(await screen.findByRole("tab", { name: "Recurring" }, LONG));
     expect(await screen.findByRole("button", { name: /New recurring expense/ }, LONG)).toBeTruthy();
     // P254 R8-2: the Retry in the categories' own note (the list's note, if any, has its own).
-    const catNote = (await screen.findByText(/Couldn't load expense categories/, {}, LONG)).closest('[role="status"]') as HTMLElement;
-    const retry = within(catNote).getByRole("button", { name: "Retry" });
+    const catNote = (await screen.findByText(/Couldn't load expense categories/, {}, LONG)).closest('[role="status"]');
+    // P254 R9: a markup change fails here, with this message, not as a null inside within().
+    expect(catNote, "the categories note is a status region").not.toBeNull();
+    const retry = within(catNote as HTMLElement).getByRole("button", { name: "Retry" });
     // loadData's catch sets the read to failed with no loading before it (use-expenses-data's refresh path).
     client.fetchExpenses.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     fireEvent.click(retry);
@@ -612,6 +614,7 @@ describe("P254 R7-2: a save that goes through closes the builder; a refused one 
       await waitFor(() => expect(call()).toHaveBeenCalled());
       await waitFor(() => expect(screen.queryByRole("dialog"), `${kind} saved, and the builder stayed open`).toBeNull(), LONG);
       // P254 R8-4: and the save was for the business the panel shows.
+      expect(call(), `${kind} sent more than once`).toHaveBeenCalledTimes(1);
       expect(call().mock.calls[0][0], `${kind} sent for another business`).toBe("biz_A");
     }, 30000);
     it(`${kind}, refused: the builder stays open`, async () => {
