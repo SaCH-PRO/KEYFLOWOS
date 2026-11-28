@@ -370,15 +370,21 @@ describe('FU-LIST-CREDIT-AWARE-REMAINING (server half)', () => {
     }
   });
 
-  it('ILR-03: list and detail agree on SENT, PARTIALLY_PAID, PAID, VOID (clamped 0), FULLY_CREDITED (clamped 0), and DRAFT', async () => {
+  it('ILR-03: list and detail agree on SENT, PENDING, OVERDUE, PARTIALLY_PAID, PAID, VOID (0), FULLY_CREDITED (0), and DRAFT', async () => {
     const invSent = await seedInvoice({ status: 'SENT', total: 300 });
+    const invPending = await seedInvoice({ status: 'PENDING', total: 220 });
+    const invOverdue = await seedInvoice({ status: 'OVERDUE', total: 350 });
     const invPart = await seedInvoice({ status: 'PARTIALLY_PAID', total: 500 });
     await seedPayment({ invoiceId: invPart, amount: 120, status: 'SUCCESSFUL' });
     const invPaid = await seedInvoice({ status: 'PAID', total: 200 });
     await seedPayment({ invoiceId: invPaid, amount: 200, status: 'SUCCESSFUL' });
+    const invPaidRowless = await seedInvoice({ status: 'PAID', total: 500 });
+    const invPaidUnder = await seedInvoice({ status: 'PAID', total: 500 });
+    await seedPayment({ invoiceId: invPaidUnder, amount: 100, status: 'SUCCESSFUL' });
     const invVoid = await seedInvoice({ status: 'VOID', total: 400 });
     const invFullCred = await seedInvoice({ status: 'FULLY_CREDITED', total: 500 });
     await seedCreditNote({ invoiceId: invFullCred, amount: 500, status: 'APPLIED' });
+    const invFullCredRowless = await seedInvoice({ status: 'FULLY_CREDITED', total: 320 });
     const invDraft = await seedInvoice({ status: 'DRAFT', total: 150 });
 
     const listRes = await agent().get(`/commerce/businesses/${ID.bizA}/invoices`).set(HEADER, ID.ownerA);
@@ -387,10 +393,15 @@ describe('FU-LIST-CREDIT-AWARE-REMAINING (server half)', () => {
 
     const expected: Array<[string, { paidAmount: number; creditedAmount: number; remaining: number }]> = [
       [invSent, { paidAmount: 0, creditedAmount: 0, remaining: 300 }],
+      [invPending, { paidAmount: 0, creditedAmount: 0, remaining: 220 }],
+      [invOverdue, { paidAmount: 0, creditedAmount: 0, remaining: 350 }],
       [invPart, { paidAmount: 120, creditedAmount: 0, remaining: 380 }],
       [invPaid, { paidAmount: 200, creditedAmount: 0, remaining: 0 }],
+      [invPaidRowless, { paidAmount: 0, creditedAmount: 0, remaining: 0 }],
+      [invPaidUnder, { paidAmount: 100, creditedAmount: 0, remaining: 0 }],
       [invVoid, { paidAmount: 0, creditedAmount: 0, remaining: 0 }],
       [invFullCred, { paidAmount: 0, creditedAmount: 500, remaining: 0 }],
+      [invFullCredRowless, { paidAmount: 0, creditedAmount: 0, remaining: 0 }],
       [invDraft, { paidAmount: 0, creditedAmount: 0, remaining: 150 }],
     ];
 
@@ -433,7 +444,7 @@ describe('FU-LIST-CREDIT-AWARE-REMAINING (server half)', () => {
     expect(crossBiz.status).toBe(403);
   });
 
-  it('ILR-05: batches credit-note sums into one query for credited pages and zero queries for non-credited pages', async () => {
+  it('ILR-05: batches credit-note sums into one query for credited pages, maps each row accurately, and runs zero queries for non-credited pages', async () => {
     const inv1 = await seedInvoice({ status: 'PARTIALLY_CREDITED', total: 500 });
     const inv2 = await seedInvoice({ status: 'PARTIALLY_CREDITED', total: 300 });
     const inv3 = await seedInvoice({ status: 'FULLY_CREDITED', total: 200 });
@@ -475,6 +486,10 @@ describe('FU-LIST-CREDIT-AWARE-REMAINING (server half)', () => {
     expect(resCredited.status).toBe(200);
     expect(groupByCalls).toBe(1);
     expect(aggregateCalls).toBe(0);
+    const byId = new Map<string, any>(resCredited.body.data.map((r: any) => [r.id, r]));
+    expect(byId.get(inv1)).toMatchObject({ creditedAmount: 100, remaining: 400 });
+    expect(byId.get(inv2)).toMatchObject({ creditedAmount: 50, remaining: 250 });
+    expect(byId.get(inv3)).toMatchObject({ creditedAmount: 200, remaining: 0 });
 
     // Now clear and seed only SENT invoices -> zero creditNote queries
     await clearInvoicesOnly();
@@ -487,5 +502,29 @@ describe('FU-LIST-CREDIT-AWARE-REMAINING (server half)', () => {
     expect(resPlain.body.data[0].remaining).toBe(100);
     expect(groupByCalls).toBe(0);
     expect(aggregateCalls).toBe(0);
+  });
+
+  it('ILR-06: enforces D-250 owedCap upper bound when orphan negative REFUNDED rows push net < 0', async () => {
+    const invSentOrphan = await seedInvoice({ status: 'SENT', total: 500 });
+    await seedPayment({ invoiceId: invSentOrphan, amount: -100, status: 'REFUNDED' });
+
+    const invCredOrphan = await seedInvoice({ status: 'PARTIALLY_CREDITED', total: 500 });
+    await seedCreditNote({ invoiceId: invCredOrphan, amount: 100, status: 'APPLIED' });
+    await seedPayment({ invoiceId: invCredOrphan, amount: -100, status: 'REFUNDED' });
+
+    const listRes = await agent().get(`/commerce/businesses/${ID.bizA}/invoices`).set(HEADER, ID.ownerA);
+    expect(listRes.status).toBe(200);
+    const byId = new Map<string, any>(listRes.body.data.map((r: any) => [r.id, r]));
+
+    expect(byId.get(invSentOrphan)).toMatchObject({ creditedAmount: 0, remaining: 500 });
+    expect(byId.get(invCredOrphan)).toMatchObject({ creditedAmount: 100, remaining: 400 });
+
+    const detSent = await agent().get(`/commerce/businesses/${ID.bizA}/invoices/${invSentOrphan}`).set(HEADER, ID.ownerA);
+    expect(detSent.status).toBe(200);
+    expect(detSent.body).toMatchObject({ creditedAmount: 0, remaining: 500 });
+
+    const detCred = await agent().get(`/commerce/businesses/${ID.bizA}/invoices/${invCredOrphan}`).set(HEADER, ID.ownerA);
+    expect(detCred.status).toBe(200);
+    expect(detCred.body).toMatchObject({ creditedAmount: 100, remaining: 400 });
   });
 });
