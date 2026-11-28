@@ -88,8 +88,18 @@ export function assessGate(f) {
 
 const scalar = (doc, key) => (doc && typeof doc[key] === 'string' ? doc[key] : doc && doc[key] != null ? String(doc[key]) : null);
 
+/** Head ref prefixes the Agent Control Gate runs on (D-22: impl/* and pkt/*). */
+export const GATED_REF_PREFIXES = Object.freeze(['impl/', 'pkt/']);
+
+function isSameRepoGatedPr(pr, repository) {
+  const ref = String(pr?.head?.ref || '');
+  const matchesPrefix = GATED_REF_PREFIXES.some((prefix) => ref.startsWith(prefix));
+  const sameRepo = String(pr?.head?.repo?.full_name || '').toLowerCase() === repository.toLowerCase();
+  return matchesPrefix && sameRepo;
+}
+
 /**
- * Read everything assessGate needs for every open impl/ PR of this repository.
+ * Read everything assessGate needs for every open impl/ or pkt/ PR of this repository.
  * `run(args)` executes `gh <args>` and returns stdout, throwing on failure.
  */
 export function gatherGateFacts(repository, run) {
@@ -101,7 +111,7 @@ export function gatherGateFacts(repository, run) {
   const pages = json(['api', '--paginate', '--slurp', `repos/${repository}/pulls?state=open&per_page=100`]);
   if (!Array.isArray(pages)) throw new Error('the open pull request listing was not a list');
   const open = pages.flat();
-  const impl = open.filter((pr) => String(pr?.head?.ref || '').startsWith('impl/') && String(pr?.head?.repo?.full_name || '').toLowerCase() === repository.toLowerCase());
+  const impl = open.filter((pr) => isSameRepoGatedPr(pr, repository));
 
   const facts = [];
   for (const listed of impl) {
@@ -150,4 +160,4 @@ export function reportStaleGates(repository, run) {
   };
 }
 
-export default { STALE_REASONS, REPAIR, GATE_WORKFLOW, COMPARE_FILE_LIMIT, assessGate, gatherGateFacts, reportStaleGates };
+export default { STALE_REASONS, REPAIR, GATE_WORKFLOW, COMPARE_FILE_LIMIT, GATED_REF_PREFIXES, assessGate, gatherGateFacts, reportStaleGates };
