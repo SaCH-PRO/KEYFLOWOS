@@ -114,6 +114,10 @@ export default function ExpenseDetailPage() {
   // R27-2: the main read's generation. A Retry started for one expense whose reply lands once the page shows another
   // (the id changed within this page) sets nothing.
   const readGen = useRef(0);
+  // R28-1: the read each dialog was opened on. Pay's and the edit sheet's replies are judged by this page's check and
+  // by that read still being the one shown, so a reply for A1 that lands once the page shows A2 says and sets nothing.
+  const payGen = useRef(0);
+  const editGen = useRef(0);
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
@@ -166,6 +170,12 @@ export default function ExpenseDetailPage() {
       setCatRead({ kind: "loading" });
       setBudgets([]);
       setBudRead({ kind: "loading" });
+      // R28-2: and with no dialog of the previous expense open: Delete, Void, Pay and Edit act on the expense shown.
+      setShowEdit(false);
+      setConfirmDelete(false);
+      setConfirmVoid(false);
+      setShowPay(false);
+      setActionLoading(null);
       try {
         const [expRes, catRes] = await Promise.all([
           getExpense(businessId, expenseId),
@@ -276,10 +286,12 @@ export default function ExpenseDetailPage() {
       setConfirmVoid(false);
       return;
     }
+    // R28-1: the read this action was taken on; a reply that lands once the page shows another expense is dropped.
+    const gen = readGen.current;
     setActionLoading(action);
     try {
       const res = await voidBill(businessId, expense.id);
-      if (!live(businessId)) return;
+      if (!live(businessId) || gen !== readGen.current) return;
       const refusal = refusalMessage(res, { what: action === "void" ? "void this expense" : "reject this bill" });
       if (refusal !== null) {
         toast.error(refusal);
@@ -288,13 +300,17 @@ export default function ExpenseDetailPage() {
         if (res.data) setExpense({ ...expense, ...res.data });
       }
     } catch {
+      if (gen !== readGen.current) return;
       if (live(businessId)) toast.error(action === "void" ? "Couldn't void this expense." : "Failed to reject");
     }
     setActionLoading(null);
     setConfirmVoid(false);
   };
 
-  const handleApprove = () => setShowPay(true);
+  const handleApprove = () => { payGen.current = readGen.current; setShowPay(true); };
+  const payCheck = useCallback((forBusiness: string) => payGen.current === readGen.current && isCurrentBusiness(forBusiness), [isCurrentBusiness]);
+  const openEdit = () => { editGen.current = readGen.current; setShowEdit(true); };
+  const editCheck = useCallback((forBusiness: string) => editGen.current === readGen.current && isCurrentBusiness(forBusiness), [isCurrentBusiness]);
   const handleReject = () => runVoid("reject", "Bill rejected and voided");
   const handleVoid = () => runVoid("void", "Expense voided");
 
@@ -306,10 +322,11 @@ export default function ExpenseDetailPage() {
       setConfirmDelete(false);
       return;
     }
+    const gen = readGen.current;
     setActionLoading("delete");
     try {
       const res = await deleteExpense(businessId, expense.id);
-      if (!live(businessId)) return;
+      if (!live(businessId) || gen !== readGen.current) return;
       const refusal = refusalMessage(res, { what: "delete this expense" });
       if (refusal !== null) {
         toast.error(POSTED_DELETE_REFUSAL.test(refusal) ? postedDeleteWords(expense.status) : refusal);
@@ -318,6 +335,7 @@ export default function ExpenseDetailPage() {
         router.push("/app/expenses");
       }
     } catch {
+      if (gen !== readGen.current) return;
       if (live(businessId)) toast.error("Couldn't delete this expense.");
     }
     setActionLoading(null);
@@ -537,7 +555,7 @@ export default function ExpenseDetailPage() {
               <p className="text-xs text-muted-foreground mb-3">
                 {categoryLabel} · {budgetMonthLabel}
               </p>
-              {budget ? (
+              {budget && budRead.kind === "ok" ? (
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Monthly budget</span>
@@ -610,7 +628,7 @@ export default function ExpenseDetailPage() {
               <h3 className="text-sm font-semibold text-foreground mb-2">Actions</h3>
               <div className="flex flex-col gap-2">
                 <button
-                  onClick={() => setShowEdit(true)}
+                  onClick={openEdit}
                   className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-foreground border border-border hover:bg-muted transition-colors"
                 >
                   <Pencil className="w-4 h-4" />
@@ -653,7 +671,7 @@ export default function ExpenseDetailPage() {
             // R23-4: the saved expense is read again for this page only; a failed refresh is said, never thrown.
             try {
               const res = await getExpense(businessId, expenseId);
-              if (!live(businessId)) return;
+              if (!live(businessId) || editGen.current !== readGen.current) return;
               // R24-1: a refused refresh ({ error }, or no row) is said, as a thrown one is.
               if (res.error || !res.data) {
                 toast.error("Saved, but couldn't refresh this expense. Reload to see it.");
@@ -661,10 +679,10 @@ export default function ExpenseDetailPage() {
               }
               setExpense(res.data);
             } catch {
-              if (live(businessId)) toast.error("Saved, but couldn't refresh this expense. Reload to see it.");
+              if (live(businessId) && editGen.current === readGen.current) toast.error("Saved, but couldn't refresh this expense. Reload to see it.");
             }
           }}
-          isCurrentBusiness={isCurrentBusiness}
+          isCurrentBusiness={editCheck}
         />
       )}
 
@@ -698,7 +716,7 @@ export default function ExpenseDetailPage() {
           businessId={businessId}
           bill={expense}
           onClose={() => setShowPay(false)}
-          isCurrentBusiness={isCurrentBusiness}
+          isCurrentBusiness={payCheck}
           onPaid={(paid) => {
             setShowPay(false);
             toast.success("Bill paid");

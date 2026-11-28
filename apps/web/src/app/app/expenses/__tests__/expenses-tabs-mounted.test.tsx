@@ -82,9 +82,13 @@ beforeEach(() => {
 
 afterEach(() => cleanup());
 
+// R28: the whole page mounts here; under a loaded full-suite run its first read can take longer than waitFor's 1 s
+// default and the test's 5 s default (one timeout seen under load, 3 of 3 passes alone). The waits are longer; what
+// each test asserts is unchanged.
+vi.setConfig({ testTimeout: 30000 });
 async function mountPage() {
   const view = render(<ExpensesInboxPage />);
-  await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled());
+  await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled(), { timeout: 10000 });
   return view;
 }
 
