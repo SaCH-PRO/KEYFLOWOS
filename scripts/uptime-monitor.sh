@@ -98,7 +98,7 @@ get_counter() {
 # Update consecutive-failure counters and rolling per-day SLO tallies in the
 # same JSON state file, pruning days outside the rolling window. Writes
 # atomically via a temp file and prints one tab-separated summary line per
-# check: <check>\t<avail_pct>\t<budget_rem_pct>\t<good>\t<total>\t<alert_flag>
+# check: <check>\t<avail_pct>\t<budget_rem_pct>\t<good>\t<total>\t<alert_flag>\t<eff_target>
 update_state_and_slo() {
   local state_file="$1" new_web="$2" new_api="$3" web_ok="$4" api_ok="$5" now_iso="$6"
   python3 - "$state_file" "$new_web" "$new_api" "$web_ok" "$api_ok" "$now_iso" \
@@ -134,8 +134,10 @@ try:
 except ValueError:
     target_pct = 99.5
 
+target_label = f"{target_pct:g}"
+
 try:
-    window_days = max(1, int(window_days_s))
+    window_days = min(3650, max(1, int(window_days_s)))
 except ValueError:
     window_days = 30
 
@@ -144,7 +146,8 @@ try:
 except ValueError:
     min_samples = 2
 
-DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\Z")
+MAX_STATE_BYTES = 1024 * 1024
 
 def parse_today(raw_iso: str) -> dt.date:
     m = re.match(r"^(\d{4})-(\d{2})-(\d{2})", raw_iso.strip())
@@ -162,10 +165,11 @@ cutoff = today - dt.timedelta(days=window_days - 1)
 existing = {}
 if os.path.isfile(state_file):
     try:
-        with open(state_file, "r", encoding="utf-8") as fh:
-            parsed = json.load(fh)
-            if isinstance(parsed, dict):
-                existing = parsed
+        if os.path.getsize(state_file) <= MAX_STATE_BYTES:
+            with open(state_file, "r", encoding="utf-8") as fh:
+                parsed = json.load(fh)
+                if isinstance(parsed, dict):
+                    existing = parsed
     except Exception:
         existing = {}
 
@@ -226,7 +230,7 @@ def process_check(key: str, passed: bool):
         avail_pct = 100.0
         budget_rem = 100.0
 
-    prev_exhausted = bool(entry.get("budget_exhausted", False))
+    prev_exhausted = entry.get("budget_exhausted") is True
     now_exhausted = (total_probes >= min_samples) and (avail_pct + 1e-12 < target_pct)
     should_alert = (not prev_exhausted) and now_exhausted
 
@@ -234,7 +238,7 @@ def process_check(key: str, passed: bool):
         "days": bounded_days,
         "budget_exhausted": now_exhausted,
     }
-    return f"{key}\t{avail_pct:.2f}\t{budget_rem:.2f}\t{total_good}\t{total_probes}\t{1 if should_alert else 0}"
+    return f"{key}\t{avail_pct:.2f}\t{budget_rem:.2f}\t{total_good}\t{total_probes}\t{1 if should_alert else 0}\t{target_label}"
 
 web_line = process_check("web_healthz", web_passed)
 api_line = process_check("api_readyz", api_passed)
@@ -356,7 +360,7 @@ RUN_TS="$(now_utc)"
   echo "[uptime-monitor] $RUN_TS"
   echo "  web.healthz : $WEB_HEALTHZ_URL"
   echo "  api.readyz  : $API_READYZ_URL"
-  echo "  state file  : $STATE_FILE  (threshold=$FAIL_THRESHOLD, slo_target=${SLO_TARGET_PCT}%, window=${SLO_WINDOW_DAYS}d)"
+  echo "  state file  : $STATE_FILE  (threshold=$FAIL_THRESHOLD)"
 }
 
 state=$(read_state)
@@ -379,11 +383,16 @@ else
   new_api=$(( prev_api + 1 ))
 fi
 
-slo_summary=$(update_state_and_slo "$STATE_FILE" "$new_web" "$new_api" "$web_ok" "$api_ok" "$RUN_TS")
+if ! slo_summary=$(update_state_and_slo "$STATE_FILE" "$new_web" "$new_api" "$web_ok" "$api_ok" "$RUN_TS"); then
+  echo "[uptime-monitor] WARN: failed to update state/SLO ledger at $STATE_FILE" >&2
+  slo_summary=""
+fi
 
+eff_target="99.5"
 web_avail="100.00" web_budget="100.00" web_good="0" web_total="0" web_slo_alert="0"
 api_avail="100.00" api_budget="100.00" api_good="0" api_total="0" api_slo_alert="0"
-while IFS=$'\t' read -r s_key s_avail s_budget s_good s_total s_alert; do
+while IFS=$'\t' read -r s_key s_avail s_budget s_good s_total s_alert s_target; do
+  if [ -n "$s_target" ]; then eff_target="$s_target"; fi
   if [ "$s_key" = "web_healthz" ]; then
     web_avail="$s_avail" web_budget="$s_budget" web_good="$s_good" web_total="$s_total" web_slo_alert="$s_alert"
   elif [ "$s_key" = "api_readyz" ]; then
@@ -411,19 +420,19 @@ fi
 
 # SLO error-budget exhaustion transitions (one alert per transition)
 if [ "$web_slo_alert" = "1" ]; then
-  emit_alert "SLO_BUDGET_EXHAUSTED" "web.healthz" "availability_30d=${web_avail}% error_budget_remaining=${web_budget}% (good=${web_good}/total=${web_total}, target=${SLO_TARGET_PCT}%)"
+  emit_alert "SLO_BUDGET_EXHAUSTED" "web.healthz" "availability_30d=${web_avail}% error_budget_remaining=${web_budget}% (good=${web_good}/total=${web_total}, target=${eff_target}%)"
 fi
 if [ "$api_slo_alert" = "1" ]; then
-  emit_alert "SLO_BUDGET_EXHAUSTED" "api.readyz" "availability_30d=${api_avail}% error_budget_remaining=${api_budget}% (good=${api_good}/total=${api_total}, target=${SLO_TARGET_PCT}%)"
+  emit_alert "SLO_BUDGET_EXHAUSTED" "api.readyz" "availability_30d=${api_avail}% error_budget_remaining=${api_budget}% (good=${api_good}/total=${api_total}, target=${eff_target}%)"
 fi
 
 [ "$QUIET" = "1" ] && [ "$web_ok" -eq 0 ] && [ "$api_ok" -eq 0 ] || {
   printf '  web.healthz : %s  (consecutive_failures=%d)\n' "$web_result" "$new_web"
   printf '  api.readyz  : %s  (consecutive_failures=%d)\n' "$api_result" "$new_api"
   printf '  web.healthz availability_30d=%s%% error_budget_remaining=%s%% (good=%s/total=%s, target=%s%%)\n' \
-    "$web_avail" "$web_budget" "$web_good" "$web_total" "$SLO_TARGET_PCT"
+    "$web_avail" "$web_budget" "$web_good" "$web_total" "$eff_target"
   printf '  api.readyz availability_30d=%s%% error_budget_remaining=%s%% (good=%s/total=%s, target=%s%%)\n' \
-    "$api_avail" "$api_budget" "$api_good" "$api_total" "$SLO_TARGET_PCT"
+    "$api_avail" "$api_budget" "$api_good" "$api_total" "$eff_target"
 }
 
 if [ "$new_web" -ge "$FAIL_THRESHOLD" ] || [ "$new_api" -ge "$FAIL_THRESHOLD" ]; then
