@@ -1,6 +1,8 @@
 import { Global, Module } from '@nestjs/common';
 import { CatalogController } from './catalog.controller';
 import { CatalogService } from './catalog.service';
+import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
+import { PlanLimitGuard } from '../subscriptions/plan-limit.guard';
 
 /**
  * Shared Catalog domain (S1).
@@ -11,8 +13,9 @@ import { CatalogService } from './catalog.service';
  */
 @Global()
 @Module({
+  imports: [SubscriptionsModule],
   controllers: [CatalogController],
-  providers: [CatalogService],
+  providers: [CatalogService, PlanLimitGuard],
   exports: [CatalogService],
 })
 export class CatalogModule {}

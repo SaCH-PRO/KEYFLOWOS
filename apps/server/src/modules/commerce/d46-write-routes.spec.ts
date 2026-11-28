@@ -259,7 +259,7 @@ const OTHER_CONTROLLERS: Record<string, Record<string, { kind: OtherKind; why: s
 
 /** The constructor dependencies of each other controller with GUARDED writes, by name, in order. */
 const OTHER_CONSTRUCTOR_DEPS: Record<string, string[]> = {
-  RecurringInvoiceController: ['service', 'prisma'],
+  RecurringInvoiceController: ['service', 'prisma', 'subscriptions'],
   DriveIntakeController: ['connectorIntelligence', 'orchestrator', 'prisma'],
 };
 

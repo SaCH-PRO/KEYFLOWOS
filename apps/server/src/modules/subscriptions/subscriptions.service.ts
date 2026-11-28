@@ -347,10 +347,11 @@ export class SubscriptionsService {
   }
 
   /**
-   * V1-66 (QUICK-SALE-SERVER, owner ruling D-160 `plans`): quick counter sales
-   * do not count toward the monthly invoice cap. Matching against the tenant's
-   * actual `marketplace_orders` row (`type = 'QUICK_SALE'`) guarantees a forged
-   * regular invoice carrying an `INV-QS-*` number is still counted.
+   * V1-66 (QUICK-SALE-SERVER & PLAN-TABLE, owner ruling D-160 `plans`):
+   * storefront orders and quick counter sales do not count toward the monthly
+   * invoice cap. Matching against the tenant's actual `marketplace_orders` row
+   * (`type IN ('QUICK_SALE', 'STOREFRONT')`) guarantees a forged regular
+   * invoice carrying an `INV-QS-*` or `INV-ORD-*` number is still counted.
    *
    * V1-65 (DEMO-PREVIEW, owner ruling D-157, BUG-094): legacy demo invoices
    * (`DEMO-%` on a same-tenant `source = 'demo'` contact, even if that contact
@@ -370,8 +371,16 @@ export class SubscriptionsService {
           SELECT 1
           FROM marketplace_orders o
           WHERE o.business_id = i.business_id
-            AND o.type = 'QUICK_SALE'
-            AND i.invoice_number = 'INV-' || o.order_number
+            AND (
+              (o.type = 'QUICK_SALE' AND i.invoice_number = 'INV-' || o.order_number)
+              OR (
+                o.type = 'STOREFRONT'
+                AND (
+                  i.invoice_number = 'INV-' || o.order_number
+                  OR i.invoice_number = 'INV-ORD-' || o.order_number
+                )
+              )
+            )
         )
         AND NOT (
           i.invoice_number LIKE 'DEMO-%'
@@ -423,6 +432,10 @@ export class SubscriptionsService {
         const limit = limits.invoicesPerMonth;
         return { allowed: limit === -1 || count < limit, limit, current: count, upgradeTo };
       }
+      case 'recurring_invoices': {
+        const enabled = Boolean(limits.recurringInvoices);
+        return { allowed: enabled, limit: enabled ? -1 : 0, current: 0, upgradeTo };
+      }
       case 'marketplace_listings': {
         const count = await this.db.marketplaceListing.count({ where: { businessId } });
         const limit = (limits as any).marketplaceListings ?? 0;
@@ -461,7 +474,7 @@ export class SubscriptionsService {
         const count = await this.db.expense.count({
           where: { businessId, createdAt: { gte: startOfMonth } },
         });
-        const limit = (limits as any).expenses ?? 10;
+        const limit = (limits as any).expenses ?? -1;
         return { allowed: limit === -1 || count < limit, limit, current: count, upgradeTo };
       }
       case 'webhooks': {
@@ -650,20 +663,21 @@ export class SubscriptionsService {
       ai_credits: aiCreditsUsed,
     };
 
+    const isUncappedLabel = (v: unknown) => v === 'Unlimited' || v === 'Fair use';
     const resourceUsage = FEATURE_REGISTRY
       .filter(f => f.type === 'limit' && f.billable)
       .map(f => {
         const current = usageMap[f.key] ?? 0;
         const tierValue = f.tiers[subInfo.plan as keyof typeof f.tiers];
-        const limit = tierValue === 'Unlimited' ? -1 : (typeof tierValue === 'number' ? tierValue : 0);
+        const limit = isUncappedLabel(tierValue) ? -1 : (typeof tierValue === 'number' ? tierValue : 0);
         const isUnlimited = limit === -1;
         const percent = isUnlimited ? 0 : (limit > 0 ? Math.min(100, Math.round((current / limit) * 100)) : 0);
 
         const nextTier = subInfo.plan === 'FREE' ? 'FLOW' : (subInfo.plan === 'FLOW' ? 'KEYFLOW' : null);
         let upgradeTo: string | null = null;
-        if (nextTier) {
+        if (nextTier && !isUnlimited) {
           const nextTierValue = f.tiers[nextTier as keyof typeof f.tiers];
-          if (nextTierValue === 'Unlimited' || (typeof nextTierValue === 'number' && nextTierValue > (typeof tierValue === 'number' ? tierValue : 0))) {
+          if (isUncappedLabel(nextTierValue) || (typeof nextTierValue === 'number' && nextTierValue > (typeof tierValue === 'number' ? tierValue : 0))) {
             upgradeTo = nextTier;
           }
         }
@@ -677,7 +691,7 @@ export class SubscriptionsService {
           limit,
           isUnlimited,
           percent,
-          atLimit: !isUnlimited && limit > 0 && current >= limit,
+          atLimit: !isUnlimited && (limit === 0 || current >= limit),
           nearLimit: !isUnlimited && limit > 0 && percent >= 80,
           upgradeTo,
         };

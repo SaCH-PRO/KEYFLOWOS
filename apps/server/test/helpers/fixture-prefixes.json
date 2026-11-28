@@ -1775,6 +1775,11 @@
       "prefix": "v72k_",
       "owner": "apps/server/test/key-learning-outcome-semantics.integration.test.ts",
       "packet": "V1-72 (RR-LEARNING-OUTCOME-SEMANTICS)"
+    },
+    {
+      "prefix": "v66f_",
+      "owner": "apps/server/test/plan-table.integration.test.ts",
+      "packet": "V1-66 (PLAN-TABLE)"
     }
   ],
   "pendingRenames": [],
