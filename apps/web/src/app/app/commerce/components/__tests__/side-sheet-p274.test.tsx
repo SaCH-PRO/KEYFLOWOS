@@ -15,7 +15,7 @@
  * P274-7 (the caret restore in WebKit and Firefox) is a browser check, outside jsdom: see the R5 PROGRESS comment.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { StrictMode, useEffect, useRef, useState, type ReactNode } from "react";
 import { render, screen, cleanup, act, fireEvent, waitFor } from "@testing-library/react";
 
 import { SideSheet, QuickSheet } from "../side-sheet";
@@ -54,6 +54,7 @@ async function flip(toPhone: boolean) {
 function chromiumBlurOnRemove() {
   const proto = Node.prototype;
   const { appendChild, insertBefore, removeChild } = proto;
+  const { remove } = Element.prototype;
   const blurIfInside = (n: Node) => {
     const a = document.activeElement as HTMLElement | null;
     if (!a || a === document.body || !n.isConnected || !n.contains(a)) return;
@@ -63,7 +64,8 @@ function chromiumBlurOnRemove() {
   proto.appendChild = function <T extends Node>(this: Node, n: T): T { blurIfInside(n); return appendChild.call(this, n) as T; };
   proto.insertBefore = function <T extends Node>(this: Node, n: T, ref: Node | null): T { blurIfInside(n); return insertBefore.call(this, n, ref) as T; };
   proto.removeChild = function <T extends Node>(this: Node, n: T): T { blurIfInside(n); return removeChild.call(this, n) as T; };
-  return () => { proto.appendChild = appendChild; proto.insertBefore = insertBefore; proto.removeChild = removeChild; };
+  Element.prototype.remove = function (this: Element) { blurIfInside(this); remove.call(this); };
+  return () => { proto.appendChild = appendChild; proto.insertBefore = insertBefore; proto.removeChild = removeChild; Element.prototype.remove = remove; };
 }
 
 describe("P274-1: a flip does not blur the focused child", () => {
@@ -311,6 +313,18 @@ describe("P274-5: a closed or unmounted sheet's containers hold nothing of it", 
     for (const c of kept) expect(c.parentNode, "the closed sheet's shell is still reachable").toBeNull();
     view.rerender(el(true));
     await settle();
+    expect(screen.getByText("body").closest('[role="dialog"]')).toBe(screen.getByRole("dialog"));
+    expect(screen.getByText("Save").closest('[role="dialog"]')).toBe(screen.getByRole("dialog"));
+  });
+});
+
+describe("P274-5 control: StrictMode", () => {
+  it("under StrictMode (its effects and refs run twice on mount) the children and the footer are in the open sheet, and a flip keeps them", async () => {
+    render(<StrictMode><SideSheet open onClose={() => {}} title="Edit Expense" footer={<button>Save</button>}><p>body</p></SideSheet></StrictMode>);
+    await settle();
+    expect(screen.getByText("body").closest('[role="dialog"]')).toBe(screen.getByRole("dialog"));
+    expect(screen.getByText("Save").closest('[role="dialog"]')).toBe(screen.getByRole("dialog"));
+    await flip(true);
     expect(screen.getByText("body").closest('[role="dialog"]')).toBe(screen.getByRole("dialog"));
     expect(screen.getByText("Save").closest('[role="dialog"]')).toBe(screen.getByRole("dialog"));
   });
