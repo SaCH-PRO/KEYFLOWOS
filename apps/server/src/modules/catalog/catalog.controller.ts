@@ -4,6 +4,7 @@ import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireAlternativeModuleScope, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { PublicRateLimitGuard, PublicRateLimit } from '../../core/guards/public-rate-limit.guard';
+import { PlanLimitGuard, RequirePlanLimit } from '../subscriptions/plan-limit.guard';
 import { CreateProductDto } from '../commerce/dto/create-product.dto';
 import { BulkProductsDto } from '../commerce/dto/bulk-products.dto';
 import { CreateCatalogServiceDto, UpdateCatalogServiceDto, BatchCatalogServicesDto } from './dto/catalog-service.dto';
@@ -44,8 +45,9 @@ export class CatalogController {
     );
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, PlanLimitGuard)
   @RequireModuleScope('revenue', 'write')
+  @RequirePlanLimit('products')
   @Post('businesses/:businessId/products')
   createProduct(@Param('businessId') businessId: string, @Body() body: CreateProductDto) {
     return this.catalog.createProduct({ ...body, businessId });

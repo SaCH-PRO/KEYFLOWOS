@@ -3582,6 +3582,8 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
       const { RevenuePostingService } = await import('../src/modules/finance/revenue-posting.service');
       const { CatalogController } = await import('../src/modules/catalog/catalog.controller');
       const { CatalogService } = await import('../src/modules/catalog/catalog.service');
+      const { PlanLimitGuard } = await import('../src/modules/subscriptions/plan-limit.guard');
+      const { SubscriptionsService } = await import('../src/modules/subscriptions/subscriptions.service');
       const { CommerceInsightsController } = await import('../src/modules/commerce/commerce-insights.controller');
       const { InventoryRiskService } = await import('../src/modules/commerce/inventory-risk.service');
       const { LandedCostEngine } = await import('../src/modules/commerce/landed-cost-engine.service');
@@ -3604,6 +3606,8 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
           AuthGuard,
           BusinessGuard,
           ModuleScopeGuard,
+          PlanLimitGuard,
+          { provide: SubscriptionsService, useValue: { checkLimit: async () => ({ allowed: true, current: 0, limit: -1, upgradeTo: 'FLOW' }) } },
           PublicRateLimitGuard,
           HoneypotGuard,
           { provide: REDIS_CLIENT, useValue: redis },

@@ -142,6 +142,8 @@ beforeAll(async () => {
   const { MaturityAssessmentService } = await import('../src/modules/analytics/maturity-assessment.service');
   const { CatalogController } = await import('../src/modules/catalog/catalog.controller');
   const { CatalogService } = await import('../src/modules/catalog/catalog.service');
+  const { PlanLimitGuard } = await import('../src/modules/subscriptions/plan-limit.guard');
+  const { SubscriptionsService } = await import('../src/modules/subscriptions/subscriptions.service');
   const { SocialController } = await import('../src/modules/social/social.controller');
   const { SocialService } = await import('../src/modules/social/social.service');
   const { SocialConnectionsService } = await import('../src/modules/social/social-connections.service');
@@ -163,6 +165,8 @@ beforeAll(async () => {
       AuthGuard,
       BusinessGuard,
       scopeMod.ModuleScopeGuard,
+      PlanLimitGuard,
+      { provide: SubscriptionsService, useValue: { checkLimit: async () => ({ allowed: true, current: 0, limit: -1, upgradeTo: 'FLOW' }) } },
       CatalogService,
       SocialConnectionsService,
       { provide: EventEmitter2, useValue: { emit: () => true } },
