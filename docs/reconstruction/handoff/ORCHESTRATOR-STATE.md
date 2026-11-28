@@ -1,7 +1,7 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-28 ~01:40 UTC by the acting orchestrator (`session_017o9EBfFipLMDKriFTiae7Y`, Claude Code), after
-M42 merged. Main is `f8ed5984`. Rewrite in place on every merge, packet return or owner ruling; never append. What you
+Last written: 2026-11-28 ~05:05 UTC by the acting orchestrator (`session_017o9EBfFipLMDKriFTiae7Y`, Claude Code), after
+M44 merged. Main is `9e0f64c4`. Rewrite in place on every merge, packet return or owner ruling; never append. What you
 remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -17,7 +17,7 @@ conversation that produced it. Read `docs/development/agent-memory/README.md` fi
 | How to brief a worker, review a return, build and merge a wave, ask the owner | `docs/development/agent-memory/` |
 | What happened, in order, with evidence | GitHub issue #80 (control room) and git history |
 
-## 0. Current state: the next session starts here (2026-11-28 ~01:40 UTC)
+## 0. Current state: the next session starts here (2026-11-28 ~05:05 UTC)
 
 **Control room: issue #273** (continuation of #80, which is full and read-only). Post with `gh api repos/KEYFLOWOS/KEYFLOWOS/issues/273/comments -F body=@<file>`. Wherever this file, CLAUDE.md or the agent-memory docs say "#80" for posting, read #273.
 
@@ -27,12 +27,22 @@ pushed `pkt/V1-*` branches. No local branch, worktree, log or agent of this sess
 **Orchestrator:** `session_017o9EBfFipLMDKriFTiae7Y` (since 2026-11-27 ~00:50 UTC). An hourly scheduled check
 (`trig_01HUyoEU9w9zzJBNR3t5qFjL`) runs section 0.5 step 7 in this session.
 
-**State:** main `f8ed5984` (M42 #285 merged 2026-11-28 ~01:30 UTC; Antigravity's M75, M77, M79 and M81 merged before it). V1-STATUS: 261 of 396 done (68.5% of points). Production still runs `f5d58ef7` (16 Nov). Under D-321 the owner redeploys only after every launch-track packet has merged, with ADMIN_EMAIL and ADMIN_PASSWORD_HASH set (D-290); the owner runs the Q50 query (#273 7228553117) before that.
+**State:** main `2e4c7a7b` (M40 #284 merged 2026-11-28 04:58 UTC; M42 #285 at 01:25; Antigravity's M83 and M85 between). V1-STATUS: 269 of 396 done (70.5% of points; launch 179 of 255). Production still runs `f5d58ef7` (16 Nov). Under D-321 the owner redeploys only after every launch-track packet has merged, with ADMIN_EMAIL and ADMIN_PASSWORD_HASH set (D-290); the owner runs the Q50 query (#273 7228553117) before that.
 
 **Board numbering (D-297):** Claude-lane rows number from P200 up; Antigravity keeps its own sequence below 200. Claude
 waves are even-numbered, Antigravity's odd. Server follow-ups found in Claude reviews become Antigravity board rows.
 
 ### 0.1 Waves this session
+
+**Checkpoint 2026-11-28 05:30 UTC: M40 (#284) and M44 (#295) merged; EXPENSES-HUB-3 is fully on main.**
+- EXPENSES-HUB-3 (P221) was RETURNed after 29 repair rounds (#273 7233136312), each round confirmed by two reviews. It is 85 files, over the 50-file divergence gate, so it ships in two waves (WAVE-RUNBOOK 3, no override):
+  - M40 = RED (7 changed + 21 new specs) + FIX (18 code files) + docs; merged.
+  - M44 = the other 39 specs, tests only; PR #295 @ `db181693`, merged 05:28 UTC after two wave confirmations.
+  - M40 + M44 equal `pkt/V1-EXPENSES-HUB-3` @ `f600c545`. Five business-switch guards are pinned only by M44's specs (now on main).
+- M40 proof at `782275fa` against `4fc49343`: Release 0 and release0-live passed at both. Journeys H and J have no head-only failures, and the wave fixes H4 (phone), H10 and J6. The receipt sweep passed. Confirmations: two at `e2f5e444` and two merge-delta at `782275fa`.
+- **Proof-harness fix:** a leftover `next-server` from a stopped proof held port 5000. `lsof` did not show it, and Playwright's `reuseExistingServer` reused it after `.next` was rebuilt, so every live page got 404s and 500s and stuck on "Verifying session…". Before a proof: `pgrep -f next-server` must be empty and `curl 127.0.0.1:5000` must fail. The proof script now checks both. Never `pkill` a proof without also killing its `next-server`.
+- **Main-moves loop:** M85 merged during the first M40 proof (it was already queued before the merge-window request), which forced one more merge and proof. Antigravity ACKed and held after that. Ask for the window when a Claude proof starts, and release it on MERGED.
+- **Speed tracker (D-320), running totals:** EH3 took about 33 h from first review to M40's merge (29 rounds; about 1 h of re-proofs for main moves; about 25 min lost to the harness incident). P231 is at about 27 h and 15 rounds. No restart losses since 02:15 UTC.
 
 **Checkpoint 2026-11-28 01:40 UTC: M42 merged (#285, main `f8ed5984`).**
 - M42 = WEDGE-HIDE-STORE parts 1 and 2 (P225) + P233 + P248 (server failsafe, Antigravity) + P232 FU-PORTAL-WEB-OPTIONAL-TOKEN + a B5 journey wait (`69bc3d5a`) + docs. Final head `7f3e7c76`.
@@ -50,12 +60,11 @@ waves are even-numbered, Antigravity's odd. Server follow-ups found in Claude re
 
 | Packet | Branch @ head | State | Next |
 | --- | --- | --- | --- |
-| **P225 WEDGE-HIDE-STORE parts 1 and 2, P232, P233** | merged | M42 | — |
-| **P221 EXPENSES-HUB-3** | `pkt/V1-EXPENSES-HUB-3` @ `19da368` | R26 CONFIRMED by both reviews (correctness local, security WEDGE worker); R27 (four MINORs: id-change budget state and read generation, recurring button reset) with the worker | Two reviews of R27; then rebuild M40 (EH3 + docs) |
-| **P231 TRUST-BADGES-TRUE-ONLY** | `pkt/V1-TRUST-BADGES-TRUE-ONLY` @ `daa0830` | R12 CONFIRMED by both; R13 (two MINORs) returned | Two reviews of R13 running (WEDGE worker; local correctness); then a wave |
+| **P221 EXPENSES-HUB-3** | merged (M40 #284 + M44 #295) | done | — |
+| **P231 TRUST-BADGES-TRUE-ONLY** | `pkt/V1-TRUST-BADGES-TRUE-ONLY` @ `386318a` | R15 CONFIRMED by both; R16 (six small clip() items + main merge) with worker `session_017o9EBgz5HFUDMDrWzuesH1` | Two reviews of R16, then a wave |
 
 **Cloud workers** (on the `keyflowos` environment, Opus; at most three at once):
-- `session_017o9EBhDj4SCaLaHVacciEC`: EXPENSES-HUB-3.
+- `session_017o9EBhDj4SCaLaHVacciEC`: EXPENSES-HUB-3 (returned; free for the next packet).
 - `session_017o9EBgz5HFUDMDrWzuesH1`: P231.
 - `session_017o9EBgPURGAKurygwgEU8p`: reviewer (WEDGE work merged). Owner answers D-299 to D-303 were given in this session.
 
