@@ -539,3 +539,96 @@ describe("P254 R6-2: the panel remounted for the same business offers no New bef
     }, 30000);
   }
 });
+
+describe("P254 R7-1: a reload that goes from ok straight to failed (no loading between) offers no New before the list answers", () => {
+  it("the categories Retry's reload rejects on Recurring, then Try again: no New until the list answers again", async () => {
+    // Categories refused at first, so the panel offers its categories Retry (the page's loadData).
+    client.fetchExpenseCategories.mockResolvedValueOnce({ data: null, error: "Request refused by the server", status: 503 });
+    render(<ExpensesInboxPage />);
+    await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalledWith("biz_A", expect.anything()), LONG);
+    fireEvent.click(await screen.findByRole("tab", { name: "Recurring" }, LONG));
+    expect(await screen.findByRole("button", { name: /New recurring expense/ }, LONG)).toBeTruthy();
+    const retry = (await screen.findAllByRole("button", { name: "Retry" }, LONG))[0];
+    // loadData's catch sets the read to failed with no loading before it (use-expenses-data's refresh path).
+    client.fetchExpenses.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    fireEvent.click(retry);
+    expect(await screen.findByText("Couldn't load expenses.", {}, LONG)).toBeTruthy();
+    const reads = client.fetchRecurringExpenses.mock.calls.length;
+    const held = deferred<unknown>();
+    client.fetchRecurringExpenses.mockImplementation(() => held.promise);
+    let offered = false;
+    const mo = new MutationObserver((records) => {
+      for (const r of records) for (const n of Array.from(r.addedNodes)) {
+        if (n instanceof HTMLElement && /New recurring expense/.test(n.textContent ?? "")) offered = true;
+      }
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(client.fetchRecurringExpenses.mock.calls.length).toBeGreaterThan(reads), LONG);
+    await settle();
+    mo.disconnect();
+    expect(offered, "New offered beside a list not read again").toBe(false);
+    expect(screen.queryByRole("button", { name: /New recurring expense/ })).toBeNull();
+    await act(async () => { held.resolve(ok([SCHEDULE])); });
+    expect(await screen.findByRole("button", { name: /New recurring expense/ }, LONG), "control: New offered once the list answers").toBeTruthy();
+  }, 30000);
+});
+
+describe("P254 R7-2: a save that goes through closes the builder; a refused one leaves it open", () => {
+  const refusedSave = { data: null, error: "Request refused by the server", status: 503 };
+  async function fillCreate() {
+    fireEvent.change(await screen.findByPlaceholderText("e.g., Office Rent", {}, LONG), { target: { value: "Office rent" } });
+    fireEvent.change(screen.getByPlaceholderText("What is this expense for?"), { target: { value: "Office rent" } });
+    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "4500" } });
+    fireEvent.change(document.querySelector('input[type="date"]') as HTMLInputElement, { target: { value: "2027-06-01" } });
+  }
+  async function newBuilder() {
+    client.fetchRecurringExpenses.mockResolvedValue(ok([]));
+    const el = (t: number) => <RecurringExpensesPanel businessId="biz_A" categories={[]} triggerNew={t} />;
+    const view = render(el(0));
+    await settle();
+    view.rerender(el(1));
+    expect(await screen.findByRole("dialog", {}, LONG)).toBeTruthy();
+    await fillCreate();
+  }
+  async function editBuilder() {
+    render(<RecurringExpensesPanel businessId="biz_A" categories={[]} triggerNew={0} />);
+    fireEvent.click(await screen.findByRole("button", { name: /^Edit$/i }, LONG));
+    expect(await screen.findByRole("button", { name: "Update" }, LONG)).toBeTruthy();
+  }
+  for (const kind of ["Create", "Update"] as const) {
+    const call = () => (kind === "Create" ? client.createRecurringExpense : client.updateRecurringExpense);
+    it(`${kind}, answered: the builder closes`, async () => {
+      call().mockResolvedValue(ok(SCHEDULE));
+      if (kind === "Create") await newBuilder(); else await editBuilder();
+      fireEvent.click(screen.getByRole("button", { name: kind }));
+      await waitFor(() => expect(call()).toHaveBeenCalled());
+      await waitFor(() => expect(screen.queryByRole("dialog"), `${kind} saved, and the builder stayed open`).toBeNull(), LONG);
+    });
+    it(`${kind}, refused: the builder stays open`, async () => {
+      call().mockResolvedValue(refusedSave);
+      if (kind === "Create") await newBuilder(); else await editBuilder();
+      fireEvent.click(screen.getByRole("button", { name: kind }));
+      await waitFor(() => expect(call()).toHaveBeenCalled());
+      await settle();
+      expect(screen.queryByRole("dialog"), `a refused ${kind} closed the builder`).toBeTruthy();
+    });
+  }
+});
+
+describe("P254 R7-3: the trigger going back to 0 while mounted opens nothing", () => {
+  it("1, the builder closed, then 0: no builder", async () => {
+    const el = (t: number) => <RecurringExpensesPanel businessId="biz_A" categories={[]} triggerNew={t} />;
+    const view = render(el(0));
+    await settle();
+    view.rerender(el(1));
+    expect(await screen.findByRole("dialog", {}, LONG)).toBeTruthy();
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(Array.from(dialog.querySelectorAll("button")).filter((b) => b.textContent?.trim() === "Cancel").at(-1)!);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull(), LONG);
+    view.rerender(el(0));
+    await settle();
+    await settle();
+    expect(screen.queryByRole("dialog"), "the trigger's reset to 0 opened the builder").toBeNull();
+  });
+});
