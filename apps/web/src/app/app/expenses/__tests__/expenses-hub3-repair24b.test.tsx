@@ -1,7 +1,8 @@
 /**
  * EXPENSES-HUB-3 repair round 24b (D-315: a refused secondary read is said, never shown as "no data").
  *
- *   The data hook's secondary reads (categories, vendor analytics, margin analysis, recurring patterns, and the
+ *   (P252: the vendor-analytics, margin and recurring-patterns reads were removed with the tabs no v1 screen mounts;
+ *   their cases here went with them.) The data hook's secondary reads (categories, and the
  *   projects, services and contacts the sheet links to) each keep a read state; a refused or failed one is a failed
  *   block, in the client's real failure shape ({ data: null, error }). Where v1 shows them (the Categories tab, the
  *   category filter, the Recurring view, the Add expense sheet) a failed block says "Couldn't load ..." with Retry,
@@ -145,9 +146,6 @@ async function pageFor(view?: "Categories" | "Recurring") {
 describe("R24b: the data hook's secondary reads, in the client's real failure shape", () => {
   const CASES = [
     ["categories", () => client.fetchExpenseCategories, "categoriesRead", /Couldn't load expense categories/],
-    ["vendors", () => client.fetchVendorAnalytics, "vendorsRead", /Couldn't load vendor analytics/],
-    ["margin", () => client.fetchMarginAnalysis, "marginRead", /Couldn't load the margin analysis/],
-    ["candidates", () => client.fetchRecurringCandidates, "candidatesRead", /Couldn't load recurring patterns/],
   ] as const;
   for (const [name, call, key, words] of CASES) {
     it(`${name}: a refused read is a failed block, never an empty one`, async () => {
