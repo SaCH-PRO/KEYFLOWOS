@@ -10,8 +10,7 @@
  *   - their reads (vendor analytics, margin analysis, recurring patterns) were made on every page load for nothing.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import React from "react";
-import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-library/react";
+import { cleanup, waitFor } from "@testing-library/react";
 import type { ExpenseBudget, ExpenseCategory, RecurringExpense } from "@/lib/client";
 
 const ZONES: Record<string, string> = vi.hoisted(() => ({ biz_A: "America/Port_of_Spain", biz_B: "America/Port_of_Spain" } as Record<string, string>));
@@ -69,7 +68,6 @@ vi.mock("@/lib/workspace", () => ({
 
 import { toast } from "sonner";
 import { useExpensesData } from "../components/use-expenses-data";
-import ExpensesInboxPage from "../page";
 import { renderHook } from "@testing-library/react";
 
 const ok = <T,>(data: T) => ({ data, error: null });
@@ -78,12 +76,6 @@ const CATS: Record<string, ExpenseCategory[]> = {
   biz_B: [{ id: "cat_B_rent", name: "Rent B", color: "#06b6d4" } as ExpenseCategory],
 };
 
-function deferred<T>() {
-  let resolve: (v: T) => void = () => {};
-  let reject: (e: unknown) => void = () => {};
-  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
-  return { promise, resolve, reject };
-}
 
 const SCHEDULE = {
   id: "rec_A1", name: "Rent", frequency: "MONTHLY", nextRunDate: "2026-12-01T00:00:00.000Z", isActive: true, runCount: 0,
@@ -115,7 +107,6 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 30)); });
 
 
 

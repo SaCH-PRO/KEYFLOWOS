@@ -5,7 +5,7 @@
  *          expenses" with its Add invitation (moves the R23-3 and R24 empty-state pins: a correction, not a weakening)
  *   R25-4  the picker read has a generation: an older failure never lands over a newer success
  *   R25-5  the picker read offers Retry when any of its parts can be retried
- *   R25-6  pins of guards no test held: a switch resets vendors, margin, candidates and pickers; A's thrown picker
+ *   R25-6  pins of guards no test held: a switch resets the pickers (P252 removed vendors, margin, candidates); A's thrown picker
  *          read does not fail B; a thrown main read fails the secondary blocks; no Retry on no access; each note's
  *          Retry reads its block again
  *   R25-7  the bill-extras notice names what was not saved; the Categories tab offers no Add while its list is unread
@@ -227,26 +227,17 @@ describe("R25-5: the picker read offers Retry when any part can be retried", () 
 });
 
 describe("R25-6 (a): a switch resets the secondary blocks", () => {
-  it("vendors, margin, candidates and pickers: A's refusals are loading on B while B's reads are out", async () => {
-    client.fetchVendorAnalytics.mockResolvedValue(refusedAnswer());
-    client.fetchMarginAnalysis.mockResolvedValue(refusedAnswer());
-    client.fetchRecurringCandidates.mockResolvedValue(refusedAnswer());
+  // P252: the vendor-analytics, margin and recurring-patterns reads were removed (no v1 screen mounts them); the
+  // switch reset is pinned for the picker read that remains.
+  it("pickers: A's refusal is loading on B while B's reads are out", async () => {
     client.fetchProjects.mockResolvedValue(refusedAnswer());
     const { result } = renderHook(() => useExpensesData());
-    await waitFor(() => {
-      expect(result.current.vendorsRead.kind).toBe("failed");
-      expect(result.current.marginRead.kind).toBe("failed");
-      expect(result.current.candidatesRead.kind).toBe("failed");
-      expect(result.current.pickersRead.kind).toBe("failed");
-    });
+    await waitFor(() => expect(result.current.pickersRead.kind).toBe("failed"));
     client.fetchExpenses.mockImplementation((b: string) => (b === "biz_B" ? new Promise(() => {}) : Promise.resolve(ok({ data: [], total: 0, page: 1, limit: 20 }))));
     client.fetchProjects.mockImplementation((b: string) => (b === "biz_B" ? new Promise(() => {}) : Promise.resolve(refusedAnswer())));
     ws.bid = "biz_B";
     act(() => { window.dispatchEvent(new CustomEvent("kf:business-changed", { detail: { businessId: "biz_B" } })); });
     await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalledWith("biz_B", expect.anything()));
-    expect(result.current.vendorsRead.kind).toBe("loading");
-    expect(result.current.marginRead.kind).toBe("loading");
-    expect(result.current.candidatesRead.kind).toBe("loading");
     expect(result.current.pickersRead.kind).toBe("loading");
   });
   it("A's failed-links note does not show in B's sheet", async () => {
