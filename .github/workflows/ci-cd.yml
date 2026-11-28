@@ -924,6 +924,23 @@ jobs:
       - name: Run packages/api tests
         run: pnpm --filter @keyflow/api test:unit
 
+  # TOF-CI-PYTHON-HARVESTER (PRS-M54): run scripts/intelligence harvester tests
+  # with stdlib unittest on pinned Python 3.12 (no extra dependencies).
+  test-python-harvester:
+    name: Run Intelligence Harvester Tests (Python)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Run harvester unit tests
+        run: python -m unittest scripts/intelligence/test_project_thread_harvester.py
+
   # Production deployment (commented out until configured)
   # deploy:
   #   name: Deploy to Production
@@ -947,7 +964,7 @@ jobs:
   ci-verdict:
     name: CI verdict (gating jobs)
     runs-on: ubuntu-latest
-    needs: [lint-and-typecheck, security-scan, build-server, build-web, e2e-mocked, test-server, test, test-proofs, test-web-api]
+    needs: [lint-and-typecheck, security-scan, build-server, build-web, e2e-mocked, test-server, test, test-proofs, test-web-api, test-python-harvester]
     if: always()
     steps:
       - name: Red unless every gating job succeeded
@@ -971,5 +988,6 @@ jobs:
           test=${{ needs.test.result }}
           test-proofs=${{ needs.test-proofs.result }}
           test-web-api=${{ needs.test-web-api.result }}
+          test-python-harvester=${{ needs.test-python-harvester.result }}
           RESULTS
           exit "$verdict"
