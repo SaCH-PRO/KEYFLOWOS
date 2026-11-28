@@ -60,6 +60,16 @@ import RecurringExpensesPanel from "../components/recurring-expenses-panel";
 
 type Form = "sidesheet"; // R22: the modal is retired
 
+/**
+ * P254 R5-1: the panel opens its builder on a New pressed while it is mounted (a change of triggerNew), never on the
+ * value it mounts with, so the builder is opened here as the page opens it: mounted with 0, then New.
+ */
+function newPressed() {
+  const view = render(<RecurringExpensesPanel businessId={BUSINESS} categories={[]} triggerNew={0} />);
+  view.rerender(<RecurringExpensesPanel businessId={BUSINESS} categories={[]} triggerNew={1} />);
+  return view;
+}
+
 function mountForm(_form: Form) {
   const props = { businessId: BUSINESS, categories: [], editingExpense: null, onClose: vi.fn(), onSaved: vi.fn() };
   return render(<ExpenseFormSideSheet {...props} />);
@@ -124,7 +134,7 @@ describe("BUG-027: a USD business sees USD on the expense screens, never TTD", (
   });
 
   it("the recurring builder names USD on its amount field", async () => {
-    render(<RecurringExpensesPanel businessId={BUSINESS} categories={[]} triggerNew={1} />);
+    newPressed();
     await waitFor(() => expect(screen.getByText(/Amount \(USD\)/)).toBeTruthy());
     expect(document.body.textContent).not.toMatch(/TTD/);
   });
@@ -261,7 +271,7 @@ describe("SEC-r1-1: the panel and the utils use the business in hand, not the ca
   });
 
   it("the builder of X's panel does not show Y's currency", async () => {
-    render(<RecurringExpensesPanel businessId={BUSINESS} categories={[]} triggerNew={1} />);
+    newPressed();
     await waitFor(() => expect(screen.getByText(/Amount \(TTD\)/)).toBeTruthy());
     fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "45" } });
     expect(document.body.textContent).not.toMatch(/USD/);
@@ -297,7 +307,7 @@ describe("SEC-r1-2: the New Recurring Expense builder never schedules a past run
   });
 
   async function openBuilder() {
-    render(<RecurringExpensesPanel businessId={BUSINESS} categories={[]} triggerNew={1} />);
+    newPressed();
     await waitFor(() => expect(screen.getByPlaceholderText("e.g., Office Rent")).toBeTruthy());
     fireEvent.change(screen.getByPlaceholderText("e.g., Office Rent"), { target: { value: "Office rent" } });
     fireEvent.change(screen.getByPlaceholderText("What is this expense for?"), { target: { value: "Office rent" } });
@@ -372,7 +382,7 @@ describe("Round 3: the recurring builder's date is a real day; an edit keeps a p
 
   it.each(["9/1/2025", "March 10, 2026", "2026-02-30", "2026-13-01"])("a next run of '%s' (not a YYYY-MM-DD day) is refused inline and nothing is sent", async (typed) => {
     const client = await import("@/lib/client");
-    render(<RecurringExpensesPanel businessId={BUSINESS} categories={[]} triggerNew={1} />);
+    newPressed();
     await waitFor(() => expect(screen.getByPlaceholderText("e.g., Office Rent")).toBeTruthy());
     fireEvent.change(screen.getByPlaceholderText("e.g., Office Rent"), { target: { value: "Office rent" } });
     fireEvent.change(screen.getByPlaceholderText("What is this expense for?"), { target: { value: "Office rent" } });
@@ -456,7 +466,7 @@ describe("Round 4: each schedule and the create form get their own builder state
   it("Edit, pressed while the Create form is still mounted, opens the schedule's own fields, not what was typed into Create", async () => {
     const client = await import("@/lib/client");
     vi.mocked(client.fetchRecurringExpenses).mockResolvedValue({ data: [SCHEDULE], error: null } as never);
-    render(<RecurringExpensesPanel businessId={BUSINESS} categories={[]} triggerNew={1} />);
+    newPressed();
     await waitFor(() => expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy());
     await waitFor(() => expect(screen.getByRole("button", { name: "Create" })).toBeTruthy());
     fireEvent.change(screen.getByPlaceholderText("e.g., Office Rent"), { target: { value: "Typed into create" } });

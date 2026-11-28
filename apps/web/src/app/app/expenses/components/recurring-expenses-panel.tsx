@@ -107,7 +107,16 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
   // The ref sync above must stay before this effect, so a New and a business change in one commit
   // read the new business. P254 R4-1: the open is queued, so it opens only if the business is still the one the New
   // was made for (a second commit in the same task may change it before the microtask runs).
+  // P254 R5-1: the builder opens only on a change of triggerNew while this panel is mounted, never on the value it
+  // mounted with: the page unmounts the panel on every reload (a failed read and its Try again, A -> B -> A in one
+  // batch), and a New pressed before that must not open the builder again unprompted. The last value seen is kept, so
+  // after a reset to 0 the next New (1) opens. Nothing mounts the panel with a New to act on: New is offered only while
+  // it is mounted, and a tab change resets the trigger (COR MINOR-6).
+  const seenTrigger = useRef(triggerNew);
   useEffect(() => {
+    const before = seenTrigger.current;
+    seenTrigger.current = triggerNew;
+    if (triggerNew === before) return;
     const forBusiness = builderBusiness.current;
     if (triggerNew && forBusiness) {
       queueMicrotask(() => {

@@ -226,6 +226,8 @@ export default function ExpensesInboxPage() {
   if (triggerBusiness !== d.businessId) {
     setTriggerBusiness(d.businessId);
     setRecurringTrigger(0);
+    // P254 R5-2: and the earlier business's list answer, so no commit offers New on B before B's list answers.
+    setRecurringRead({ kind: "loading" });
   }
   // EXPENSES-HUB-3: "Upload receipts" was a button with no handler. A receipt goes up through the one presigned
   // upload (hooks/use-upload.ts) and opens Add expense with it attached; saving writes it to Expense.receiptUrl.
