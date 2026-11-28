@@ -137,7 +137,8 @@ export class AgentController {
     return this.agentBus.getPendingMessages(businessId, topic);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Post('businesses/:businessId/agent/messages/:messageId/processed')
   async markMessageProcessed(
     @Param('businessId') businessId: string,
@@ -201,7 +202,8 @@ export class AgentController {
     };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Post('businesses/:businessId/agent/patterns/scan')
   async triggerPatternScan(@Param('businessId') businessId: string) {
     const result = await this.patternDetector.scanBusiness(businessId);
@@ -217,7 +219,8 @@ export class AgentController {
     });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Post('businesses/:businessId/agent/triggers')
   async createAgentTrigger(
     @Param('businessId') businessId: string,
@@ -236,7 +239,8 @@ export class AgentController {
     return createAgentTrigger(this.prisma, businessId, triggerWriter(req), body);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Put('businesses/:businessId/agent/triggers/:triggerId')
   async updateAgentTrigger(
     @Param('businessId') businessId: string,
@@ -331,7 +335,8 @@ export class AgentController {
    * what is undone. No canUndo pre-check here: it read the record before the
    * tenant check and told another business's id apart from an unknown one.
    */
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Post('businesses/:businessId/agent/undo/:undoId')
   async undoAction(
     @Param('businessId') businessId: string,
@@ -345,7 +350,8 @@ export class AgentController {
     return result;
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Post('businesses/:businessId/agent/documents/process')
   async processDocument(
     @Param('businessId') businessId: string,

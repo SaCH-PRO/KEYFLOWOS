@@ -232,9 +232,12 @@ beforeAll(async () => {
     await db.business.create({ data: { id, name: `V09A ${id}`, ownerId: ID.owner, currency: 'TTD' } });
     await db.membership.create({ data: { id: `${id}_m_owner`, userId: ID.owner, businessId: id, role: 'OWNER' } });
   }
-  await db.membership.create({ data: { id: `${P}m_staffRead`, userId: ID.staffRead, businessId: ID.biz, role: 'STAFF' } });
+  const { defaultScopesForRole } = await import('../src/core/authority/module-vocabulary');
   await db.membership.create({
-    data: { id: `${P}m_staffNone`, userId: ID.staffNone, businessId: ID.biz, role: 'STAFF', permissionScopes: { crm: 'none', revenue: 'none' } },
+    data: { id: `${P}m_staffRead`, userId: ID.staffRead, businessId: ID.biz, role: 'STAFF', permissionScopes: { ...defaultScopesForRole('STAFF'), ai: 'write' } },
+  });
+  await db.membership.create({
+    data: { id: `${P}m_staffNone`, userId: ID.staffNone, businessId: ID.biz, role: 'STAFF', permissionScopes: { crm: 'none', revenue: 'none', ai: 'write' } },
   });
 
   const stale = new Date(Date.now() - 60 * 86400000);

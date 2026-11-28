@@ -56,9 +56,9 @@ const ID = {
 const m = (who: string) => `${P}m_${who.slice(P.length)}`;
 const BLIND_SCOPES = {
   crm: 'read', bookings: 'read', projects: 'read', content: 'read', automations: 'read', storefront: 'read',
-  analytics: 'read', operations: 'read', ai: 'read', expenses: 'none', revenue: 'none',
+  analytics: 'read', operations: 'read', ai: 'write', expenses: 'none', revenue: 'none',
 };
-const REVENUE_SCOPES = { crm: 'read', operations: 'read', ai: 'read', revenue: 'read', expenses: 'none' };
+const REVENUE_SCOPES = { crm: 'read', operations: 'read', ai: 'write', revenue: 'read', expenses: 'none' };
 
 type Reader = 'owner' | 'blind' | 'revenue' | 'admin';
 const READERS: Reader[] = ['owner', 'blind', 'revenue', 'admin'];

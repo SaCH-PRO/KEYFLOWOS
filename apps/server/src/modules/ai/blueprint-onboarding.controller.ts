@@ -2,6 +2,7 @@ import { Body, Controller, Get, Inject, Param, Post, UnauthorizedException, UseG
 import { IsString, MaxLength, MinLength } from 'class-validator';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { CurrentUser, type AuthenticatedUser } from '../../core/decorators/current-user.decorator';
 import { BlueprintOnboardingService } from './blueprint-onboarding.service';
 
@@ -46,6 +47,8 @@ export class BlueprintOnboardingController {
     return this.onboarding.getHistory(businessId, actorId(user));
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('settings', 'write')
   @Post('onboarding-chat')
   async onboardingChat(
     @Param('businessId') businessId: string,
@@ -56,6 +59,8 @@ export class BlueprintOnboardingController {
   }
 
   /** Starts the caller's own conversation over; other members' are untouched. */
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('settings', 'write')
   @Post('onboarding-reset')
   async onboardingReset(
     @Param('businessId') businessId: string,
