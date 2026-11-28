@@ -291,7 +291,7 @@ export function onStore<D extends object>(d: D): D & { storeProducts: unknown; s
  * explicit lists of the characters the fuzz alphabets use (never clip()'s Unicode classes, so a mistake shared by
  * clip() and its check cannot pass). Returns why, or null.
  */
-const ALWAYS_DROPPED = [".", ",", ";", ":", "!", "?", "…", "—", "–", "-", "(", "[", "{", "“", "‘", "«", "„", "。", "、", "，", "！", "？", "；", "：", "．", "｡", "､"];
+const ALWAYS_DROPPED = [".", ",", ";", ":", "!", "?", "…", "—", "–", "-", "(", "[", "{", "“", "‘", "«", "„", "‚", "。", "、", "，", "！", "？", "；", "：", "．", "｡", "､"];
 /** Symbols and marks that go when they stand alone (after a space): none of them closes or means anything there. */
 const LONE_DROPPED = ["&", "•", "/", "*", "†", "‡", "#", "@", "¿", "¡", "<", "$", "€", "°", "★", "|", "©", "®", "™", "↔", "→", "‼"];
 const CURRENCY = ["$", "€"];
@@ -333,7 +333,10 @@ export function clipEndViolation(text: string, kept: string): string | null {
     const token = Array.from(m[2]);
     const bare = m[2].replace(/[*†‡]+$/u, "");
     const closingQuote = (bare === "“" && opensLow(kept.slice(0, kept.length - m[2].length), "“", "„")) || (bare === "‘" && opensLow(kept.slice(0, kept.length - m[2].length), "‘", "‚"));
-    if (!closingQuote && token.every((c) => LONE_DROPPED.includes(c) || ALWAYS_DROPPED.includes(c))) {
+    // r20: a run of markers that is held (on "5 €!", "C#.") ends a token that stays.
+    const markers = /[*†‡]+$/u.exec(m[2]);
+    const heldMarkers = markers !== null && oracleHeld(kept.slice(0, kept.length - markers[0].length));
+    if (!closingQuote && !heldMarkers && token.every((c) => LONE_DROPPED.includes(c) || ALWAYS_DROPPED.includes(c))) {
       // A currency run after a number is the number's, with any conditions marker on it (r18: "5 €*").
       const signs = token.join("").replace(/[*†‡]+$/u, "");
       const afterNumber = signs !== "" && Array.from(signs).every((c) => CURRENCY.includes(c)) && /[0-9]$/.test(m[1]);
@@ -375,12 +378,50 @@ export function clipKeepViolation(text: string, max: number, kept: string): stri
  * a mark that closes or means something, or sentence punctuation ("50%*", "Free*", "( sale )*", "Free!*"), is kept
  * whole. Returns why not, or null.
  */
-const CONDITION_HOLDERS = /[\p{L}\p{N}%+)\]}”’»"']/u;
 /**
- * r19 (R19-2): sentence punctuation holds a marker only when attached: its run of sentence punctuation (terminals,
- * "…" and commas; never ";", ":", an opener or a dash) reaches back to a letter, a digit or a kept mark.
+ * r20 (R20-1): whether the last character of `s` stays at a cut there, from explicit lists, independent of clip():
+ * a letter, a digit, an emoji, a kept mark ("%", "+", a closing bracket or quote, a straight quote), a „-closing "“";
+ * a conditions marker that is held (oracleHeld of what is before its run: "Free*!†"); a lone- or other mark whose run
+ * of marks reaches back to a letter, digit or emoji ("C#", "5™", "Off&"), or a run of currency signs after a number
+ * and one space ("5 €"). Whitespace, and an always-dropped mark (sentence punctuation, openers, dashes) do not.
  */
+const MARKERS = ["*", "†", "‡"];
+const RUN_MARKS = [...LONE_DROPPED, ...KEPT_AT_END, ...MARKERS];
 const SENTENCE_HOLDERS = [".", "!", "?", "…", "。", "！", "？", ",", "，", "、"];
+const lastOf = (s: string) => Array.from(s).at(-1) ?? "";
+const dropLast = (s: string) => Array.from(s).slice(0, -1).join("");
+const endsInWord = (s: string) => /[\p{L}\p{N}]$/u.test(s) || CLIP_EMOJI.some((e) => s.endsWith(e));
+export function oracleStays(s: string): boolean {
+  if (s === "") return false;
+  if (endsInWord(s)) return true;
+  const c = lastOf(s);
+  if (/\s/u.test(c)) return false;
+  if (KEPT_AT_END.includes(c)) return true;
+  if ((c === "“" && opensLow(dropLast(s), "“", "„")) || (c === "‘" && opensLow(dropLast(s), "‘", "‚"))) return true;
+  if (MARKERS.includes(c)) return oracleHeld(s.replace(/[*†‡]+$/u, ""));
+  if (ALWAYS_DROPPED.includes(c)) return false;
+  if (!LONE_DROPPED.includes(c)) return true;
+  let r = s;
+  let run = "";
+  while (r !== "" && RUN_MARKS.includes(lastOf(r))) {
+    run = lastOf(r) + run;
+    r = dropLast(r);
+  }
+  if (endsInWord(r)) return true;
+  return Array.from(run).every((x) => CURRENCY.includes(x)) && /[0-9]\s$/u.test(r) && !/[0-9]\s\s$/u.test(r);
+}
+/** r20 (R20-1): whether a conditions marker written right after `s` is held (stays while what it qualifies stays). */
+export function oracleHeld(s: string): boolean {
+  const c = lastOf(s);
+  if (c === "" || /\s/u.test(c)) return false;
+  if (SENTENCE_HOLDERS.includes(c)) {
+    let r = s;
+    while (r !== "" && SENTENCE_HOLDERS.includes(lastOf(r))) r = dropLast(r);
+    return oracleStays(r);
+  }
+  if (ALWAYS_DROPPED.includes(c)) return false;
+  return oracleStays(s);
+}
 export function clipConditionsTokens(text: string, max: number, kept: string): { token: string; end: number }[] {
   if (!text.startsWith(kept) || max <= 3) return [];
   const seg = new Intl.Segmenter(undefined, { granularity: "grapheme" });
@@ -389,21 +430,9 @@ export function clipConditionsTokens(text: string, max: number, kept: string): {
   for (const m of text.matchAll(/\S+(?=\s)/gu)) {
     const end = (m.index ?? 0) + m[0].length;
     if (end > room.length) break;
-    const held = /(.)[*†‡]+$/u.exec(m[0]);
-    if (!held) continue;
-    // r19 (R19-3): a currency sign holds a marker after a number ("5€*", "5 €*"); a "“" (or "‘") that closes a „ (or
-    // ‚) opened before it in the text does too ("„Big“*").
-    const at = (m.index ?? 0) + held.index;
-    const before = text.slice(0, at);
-    const currency = CURRENCY.includes(held[1]) && /[0-9]\s?$/u.test(before);
-    const closing = (held[1] === "“" && opensLow(before, "“", "„")) || (held[1] === "‘" && opensLow(before, "‘", "‚"));
-    let sentence = false;
-    if (SENTENCE_HOLDERS.includes(held[1])) {
-      const run = /[.!?…。！？,，、]+$/u.exec(before + held[1]);
-      const prior = (before + held[1]).slice(0, (before + held[1]).length - (run?.[0].length ?? 0));
-      sentence = CONDITION_HOLDERS.test(prior.slice(-1));
-    }
-    if (CONDITION_HOLDERS.test(held[1]) || currency || closing || sentence) out.push({ token: m[0], end });
+    const run = /[*†‡]+$/u.exec(m[0]);
+    if (!run) continue;
+    if (oracleHeld(text.slice(0, (m.index ?? 0) + run.index))) out.push({ token: m[0], end });
   }
   return out;
 }
