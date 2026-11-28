@@ -1765,7 +1765,10 @@
       "packet": "V1-92 (FU-REMINDER-HONESTY)",
       "prefix": "v92t_",
       "owner": "apps/server/test/invoice-list-remaining.integration.test.ts",
-      "packet": "V1-92 (FU-LIST-CREDIT-AWARE-REMAINING, Journey H)"
+      "packet": "V1-92 (FU-LIST-CREDIT-AWARE-REMAINING, Journey H)",
+      "prefix": "v72k_",
+      "owner": "apps/server/test/key-learning-outcome-semantics.integration.test.ts",
+      "packet": "V1-72 (RR-LEARNING-OUTCOME-SEMANTICS)"
     }
   ],
   "pendingRenames": [],
