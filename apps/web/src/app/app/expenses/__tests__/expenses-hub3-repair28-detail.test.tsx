@@ -235,3 +235,45 @@ describe("R28-4: A1's budgets Retry lands before A2's expense answers; A2's budg
     expect(screen.queryByText("Monthly budget"), "October's budget shown on A2").toBeNull();
   });
 });
+
+describe("R28-1: the edit sheet's refresh, held while the page moves to A2", () => {
+  for (const outcome of ["answers", "throws"] as const) {
+    it(`A1's save lands on A1, its refresh ${outcome} once the page shows A2: A2 stays A2, nothing said`, async () => {
+      client.updateExpense.mockResolvedValue(ok(A1({ description: "Edited on A1" })));
+      const view = await onA1();
+      const refresh = deferred<unknown>();
+      const reads = client.getExpense.mock.calls.length;
+      client.getExpense.mockImplementation((_b: string, id: string) => (id === "exp_A1" && client.getExpense.mock.calls.length > reads ? refresh.promise : Promise.resolve(ok(id === "exp_A2" ? A2() : A1()))));
+      fireEvent.click(screen.getByRole("button", { name: /Edit expense/ }));
+      fireEvent.click(await screen.findByRole("button", { name: "Update Expense" }));
+      await waitFor(() => expect(client.getExpense.mock.calls.length).toBeGreaterThan(reads));
+      await toA2(view);
+      vi.mocked(toast.success).mockReset();
+      vi.mocked(toast.error).mockReset();
+      await act(async () => {
+        if (outcome === "answers") refresh.resolve(ok(A1({ description: "Edited on A1" })));
+        else refresh.reject(new TypeError("Failed to fetch"));
+      });
+      await settle();
+      noToasts();
+      expect(screen.getByRole("heading", { name: "November Vendor" })).toBeTruthy();
+      expect(screen.queryByRole("heading", { name: "October Vendor" }), "A1's refresh set A1 on A2's page").toBeNull();
+    });
+  }
+});
+
+describe("R28-2: an action in flight on A1 leaves A2's actions free", () => {
+  it("A1's Void out, the id changes: A2's Void is enabled, and stays so when A1's reply lands", async () => {
+    const held = deferred<unknown>();
+    finance.voidBill.mockReturnValue(held.promise);
+    const view = await onA1();
+    await confirmIn(/Void expense/, voidOk);
+    await waitFor(() => expect(finance.voidBill).toHaveBeenCalled());
+    await toA2(view);
+    const voidA2 = () => screen.getByRole("button", { name: /Void expense/ }) as HTMLButtonElement;
+    expect(voidA2().disabled, "A2's Void held by A1's action").toBe(false);
+    await act(async () => { held.resolve(ok(A1({ status: "VOID" }))); });
+    await settle();
+    expect(voidA2().disabled).toBe(false);
+  });
+});
