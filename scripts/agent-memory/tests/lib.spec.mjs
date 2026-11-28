@@ -408,17 +408,53 @@ test('RR-STATUS-STALL-REPORT: ready rows carry ready_since and stalled (14-day b
     assert.equal(sUnknown.ready[0].stalled, false);
   }
 
-  // 7. Determinism: running status.mjs twice on the same ref produces byte-identical output.
-  const run1 = execFileSync(process.execPath, [resolve(repoRoot, 'scripts/agent-memory/status.mjs'), '--stdout', '--ref', 'origin/main'], {
+  // 7. Determinism: running status.mjs twice on the same ref produces byte-identical output (works in shallow CI checkouts).
+  const run1 = execFileSync(process.execPath, [resolve(repoRoot, 'scripts/agent-memory/status.mjs'), '--stdout', '--ref', 'HEAD'], {
     cwd: repoRoot,
     encoding: 'utf8',
   });
-  const run2 = execFileSync(process.execPath, [resolve(repoRoot, 'scripts/agent-memory/status.mjs'), '--stdout', '--ref', 'origin/main'], {
+  const run2 = execFileSync(process.execPath, [resolve(repoRoot, 'scripts/agent-memory/status.mjs'), '--stdout', '--ref', 'HEAD'], {
     cwd: repoRoot,
     encoding: 'utf8',
   });
   assert.equal(run1, run2, 'status.mjs --stdout must be byte-identical across runs on the same ref');
   assert.match(run1, /## Ready but stalled/i);
+
+  // 7b. End-to-end via real git history (commitsSince %cI): a dependency committed 30 days earlier marks dependent stalled.
+  const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { generate } = await import('../status.mjs');
+  const tmpRepo = mkdtempSync(resolve(tmpdir(), 'kf-stall-e2e-'));
+  try {
+    const gitIn = (args, envExtra = {}) =>
+      execFileSync('git', args, {
+        cwd: tmpRepo,
+        encoding: 'utf8',
+        env: { ...process.env, GIT_AUTHOR_NAME: 'test', GIT_AUTHOR_EMAIL: 't@e.com', GIT_COMMITTER_NAME: 'test', GIT_COMMITTER_EMAIL: 't@e.com', ...envExtra },
+      });
+    gitIn(['init', '-b', 'main']);
+    mkdirSync(resolve(tmpRepo, 'docs/reconstruction'), { recursive: true });
+    writeFileSync(
+      resolve(tmpRepo, 'docs/reconstruction/V1-PLAN-RECUT.json'),
+      JSON.stringify({ packets: [pk('A', [], { track: 'launch' }), pk('B', ['A'], { track: 'launch' })], validation: { critical_path: [] } }),
+    );
+    gitIn(['add', '.']);
+    gitIn(['commit', '-m', 'fix(a): pkt/V1-A (compacted)'], {
+      GIT_AUTHOR_DATE: '2026-10-25T10:00:00Z',
+      GIT_COMMITTER_DATE: '2026-10-25T10:00:00Z',
+    });
+    gitIn(['commit', '--allow-empty', '-m', 'chore: advance main 34 days'], {
+      GIT_AUTHOR_DATE: '2026-11-28T10:00:00Z',
+      GIT_COMMITTER_DATE: '2026-11-28T10:00:00Z',
+    });
+    const generated = generate(tmpRepo, 'HEAD');
+    const rowB = generated.ready.find((r) => r.id === 'B');
+    assert.ok(rowB, 'B should be ready in temp repo');
+    assert.equal(rowB.ready_since, '2026-10-25T10:00:00Z');
+    assert.equal(rowB.stalled, true);
+  } finally {
+    rmSync(tmpRepo, { recursive: true, force: true });
+  }
 
   // 8. README documents the 14-day stall budget and that the signal is informational.
   const readme = readFileSync(resolve(repoRoot, 'docs/development/agent-memory/README.md'), 'utf8');
