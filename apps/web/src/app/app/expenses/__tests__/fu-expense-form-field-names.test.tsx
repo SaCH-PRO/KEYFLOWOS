@@ -11,6 +11,11 @@
  * the submit button is disabled and nothing is sent (an empty date was saved as "today" by the server); R2-2 the
  * sweep checks a non-empty computed accessible name, file inputs included, in the add, bill and edit sheets; R2-3
  * Date's name is pinned by getByLabelText (its input has no ARIA role, so getByRole cannot query it).
+ *
+ * R3 (both reviews of R2, NITs): R3-1 a receipt's date is taken only when it is a plain YYYY-MM-DD (after any time
+ * part), otherwise the date already in the form is kept, and the form's validity check is that same pattern; R3-2 a
+ * hint beside the submit button names the empty required fields (the button's accessible description), and the
+ * form says once what the star means.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
@@ -257,5 +262,70 @@ describe("P267 R2-1: Date is validated like Description and Amount (it is marked
     expect(screen.getByRole("button", { name: "Add Expense" }), "the button is enabled with nothing filled in").toBeDisabled();
     fireEvent.change(named("textbox", "Description"), { target: { value: "Printer toner" } });
     expect(screen.getByRole("button", { name: "Add Expense" })).toBeDisabled();
+  });
+});
+
+describe("P267 R3-1: a receipt's date is taken only when it is a plain date", () => {
+  const DRIVE = "https://drive.google.com/file/d/abc/view";
+  const date = () => screen.getByLabelText(/^Date/) as HTMLInputElement;
+  const extractWith = async (issueDate: string) => {
+    client.extractReceipt.mockResolvedValue(ok({ invoiceData: { total: 99, issueDate, lineItems: [{ description: "Toner" }] }, confidence: 0.9 }));
+    fireEvent.click(screen.getAllByRole("button").find((b) => /Extract with AI/.test(b.textContent ?? ""))!);
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+  };
+  const open = () => render(<ExpenseFormSideSheet businessId="biz_A" categories={CATS as never} editingExpense={null} prefill={{ receiptUrl: DRIVE }} onClose={vi.fn()} onSaved={vi.fn()} isCurrentBusiness={() => true} />);
+  it('an ISO date with a time ("2026-03-12T00:00:00Z") fills Date with 2026-03-12', async () => {
+    open();
+    await extractWith("2026-03-12T00:00:00Z");
+    expect(date().value).toBe("2026-03-12");
+  });
+  it('a non-ISO date ("12/03/2026") keeps the date the form had, and the sheet can still be saved', async () => {
+    open();
+    const before = date().value;
+    expect(before, "the sheet no longer defaults the date").toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    await extractWith("12/03/2026");
+    expect(date().value, "the receipt's unreadable date replaced the form's").toBe(before);
+    expect(screen.getByRole("button", { name: "Add Expense" })).toBeEnabled();
+  });
+  it("a non-ISO date when Date was cleared: Date stays empty and the button stays disabled (no hidden value passes the check)", async () => {
+    open();
+    fireEvent.change(date(), { target: { value: "" } });
+    await extractWith("12/03/2026");
+    expect(date().value).toBe("");
+    expect(screen.getByRole("button", { name: "Add Expense" }), "an unreadable date counted as filled in").toBeDisabled();
+  });
+});
+
+describe("P267 R3-2: why the button is disabled is said beside it", () => {
+  const button = () => screen.getByRole("button", { name: "Add Expense" });
+  const description = () => {
+    const ids = (button().getAttribute("aria-describedby") ?? "").split(/\s+/).filter(Boolean);
+    return ids.map((id) => document.getElementById(id)?.textContent ?? "").join(" ").trim();
+  };
+  it("with Date empty (Description and Amount filled), the button's description names Date only", () => {
+    sheet();
+    fireEvent.change(named("textbox", "Description"), { target: { value: "Printer toner" } });
+    fireEvent.change(named("spinbutton", "Amount (TTD)"), { target: { value: "100" } });
+    fireEvent.change(screen.getByLabelText(/^Date/), { target: { value: "" } });
+    expect(button()).toBeDisabled();
+    expect(description(), "the button does not say what is missing").toMatch(/Date/);
+    expect(description()).not.toMatch(/Description|Amount/);
+  });
+  it("with nothing filled in, it names Description and Amount (Date has its default)", () => {
+    sheet();
+    expect(description()).toMatch(/Description/);
+    expect(description()).toMatch(/Amount/);
+    expect(description()).not.toMatch(/Date/);
+  });
+  it("control: with every required field filled, nothing is said as missing", () => {
+    sheet();
+    fireEvent.change(named("textbox", "Description"), { target: { value: "Printer toner" } });
+    fireEvent.change(named("spinbutton", "Amount (TTD)"), { target: { value: "100" } });
+    expect(button()).toBeEnabled();
+    expect(description()).not.toMatch(/Description|Amount|Date/);
+  });
+  it('the form says once what the star means ("* = required")', () => {
+    sheet();
+    expect(screen.getAllByText(/\* = required/)).toHaveLength(1);
   });
 });
