@@ -112,7 +112,28 @@ async function cleanup() {
 const http = () => request(app.getHttpServer());
 /** The JSON body of an answer, also from a route that declares another content type (the CSV report). */
 const bodyOf = (res: request.Response): unknown => (res.body && Object.keys(res.body).length ? res.body : JSON.parse(res.text || '{}'));
-const refusalPayloadText = (res: Pick<request.Response, 'body' | 'text'>): string => res.text;
+/**
+ * Refusal body text with only the echoed request envelope (`path` carrying cuid row ids and
+ * random UUID `correlationId`) removed. Non-object / non-JSON payloads fall back to raw `res.text`
+ * so leaked figures are never silently masked.
+ */
+function refusalPayloadText(res: Pick<request.Response, 'body' | 'text'>): string {
+  let parsed: unknown = res.body && typeof res.body === 'object' && Object.keys(res.body).length ? res.body : null;
+  if (!parsed && typeof res.text === 'string' && res.text.trim()) {
+    try {
+      parsed = JSON.parse(res.text);
+    } catch {
+      return res.text;
+    }
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return typeof res.text === 'string' ? res.text : JSON.stringify(parsed ?? '');
+  }
+  const rest: Record<string, unknown> = { ...(parsed as Record<string, unknown>) };
+  delete rest.path;
+  delete rest.correlationId;
+  return JSON.stringify(rest);
+}
 const fin = (rest: string) => `/finance/businesses/${ID.biz}/${rest}`;
 const exp = (rest: string) => `/expenses/businesses/${ID.biz}/${rest}`;
 const bills = (rest: string) => `/finance/businesses/${ID.biz}/${rest}`;

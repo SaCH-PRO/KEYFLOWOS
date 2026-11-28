@@ -101,8 +101,10 @@ function makeRes() {
   return r;
 }
 
+/** Flip the first character of a base64url signature (always real MAC bits, never tail padding or identical suffix). */
 function tamperSignature(sig: string): string {
-  return `${sig.slice(0, -2)}AA`;
+  if (!sig.length) throw new Error('empty signature');
+  return `${sig[0] === 'A' ? 'B' : 'A'}${sig.slice(1)}`;
 }
 
 function tamperTokenSignature(token: string): string {
