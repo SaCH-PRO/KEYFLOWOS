@@ -210,6 +210,15 @@ test('TOF-STALE-GATES-PKT: a same-repo pkt/* PR with a stale gate is assessed, w
       pr(204, 'pkt/V1-UPPERCASE-REPO', SHA1, {
         head: { ref: 'pkt/V1-UPPERCASE-REPO', sha: SHA1, repo: { full_name: 'O/R' } },
       }),
+      pr(205, 'pkt/V1-DELETED-FORK', '8'.repeat(40), {
+        head: { ref: 'pkt/V1-DELETED-FORK', sha: '8'.repeat(40), repo: null },
+      }),
+      pr(206, 'pkt/V1-EMPTY-REPO', '9'.repeat(40), {
+        head: { ref: 'pkt/V1-EMPTY-REPO', sha: '9'.repeat(40), repo: {} },
+      }),
+      pr(207, 'pkt-foo/not-gated', 'a'.repeat(40)),
+      pr(208, 'PKT/wrong-case', 'b'.repeat(40)),
+      pr(209, 'impl-foo/not-gated', 'c'.repeat(40)),
     ],
     compare: {
       [PKT_SHA]: { ahead_by: 2, files: [{ filename: 'apps/server/src/app.module.ts' }] },
@@ -229,12 +238,18 @@ test('TOF-STALE-GATES-PKT: a same-repo pkt/* PR with a stale gate is assessed, w
   });
 
   const report = reportStaleGates('o/r', gh.run);
-  assert.equal(report.open_total, 4);
+  assert.equal(report.open_total, 9);
   assert.equal(report.impl_total, 3);
   assert.deepEqual(report.prs.map((p) => p.number), [201, 202, 204]);
   assert.deepEqual(report.stale, [201]);
   assert.deepEqual(report.misleading_green, [201]);
+  const stalePkt = report.prs.find((p) => p.number === 201);
+  assert.ok(stalePkt.reasons.includes(STALE_REASONS.BEHIND_MAIN));
+  assert.ok(stalePkt.reasons.includes(STALE_REASONS.SOURCE_MAIN_NOT_BASE));
+  assert.ok(stalePkt.reasons.includes(STALE_REASONS.GATE_RUN_PREDATES_MAIN));
   assert.equal(report.prs.find((p) => p.number === 202).stale, false);
-  assert.ok(!gh.calls.some((c) => c.includes('pulls/203')), 'fork pkt/* PR must never be fetched or assessed');
+  for (const excluded of [203, 205, 206, 207, 208, 209]) {
+    assert.ok(!gh.calls.some((c) => c.includes(`pulls/${excluded}`)), `excluded PR #${excluded} must never be fetched`);
+  }
 });
 

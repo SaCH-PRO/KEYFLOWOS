@@ -1,10 +1,10 @@
 /**
- * Which open implementation PRs have a gate that main has moved out from under.
+ * Which open gated (impl/ or pkt/) PRs have a gate that main has moved out from under.
  *
  * The Agent Control Gate checks out the PR merged with its base and requires
  * that nothing outside .agent-control/ differs from the PR's `source_head`.
  * So every merge to main that changes a non-control file fails the gate of
- * every open impl/ PR the next time that gate runs -- while the PR goes on
+ * every open impl/ or pkt/ PR the next time that gate runs -- while the PR goes on
  * showing the green run it got before main moved. On a non-draft PR the gate
  * also requires both artifacts' `source_main` to equal the base.
  *
@@ -92,9 +92,11 @@ const scalar = (doc, key) => (doc && typeof doc[key] === 'string' ? doc[key] : d
 export const GATED_REF_PREFIXES = Object.freeze(['impl/', 'pkt/']);
 
 function isSameRepoGatedPr(pr, repository) {
+  const repo = String(repository || '').trim().toLowerCase();
+  if (!repo) return false;
   const ref = String(pr?.head?.ref || '');
   const matchesPrefix = GATED_REF_PREFIXES.some((prefix) => ref.startsWith(prefix));
-  const sameRepo = String(pr?.head?.repo?.full_name || '').toLowerCase() === repository.toLowerCase();
+  const sameRepo = String(pr?.head?.repo?.full_name || '').toLowerCase() === repo;
   return matchesPrefix && sameRepo;
 }
 
