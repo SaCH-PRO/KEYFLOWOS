@@ -1,4 +1,7 @@
 /**
+ * R22: ExpenseFormModal is retired (it had no production mount); its tests in this file were removed. The R22
+ * PROGRESS on #273 names the side-sheet test that covers each.
+ *
  * EXPENSES-HUB-2 (SWP-EXPENSE-CURRENCY-DATE; BUG-027, BUG-028; journey H4).
  *
  * BUG-027: the expense screens name TTD whatever the business currency is: the
@@ -49,18 +52,17 @@ vi.mock("@/lib/client", () => ({
 }));
 
 import { toast } from "sonner";
-import { ExpenseFormModal } from "../components/expense-form-modal";
 import { ExpenseFormSideSheet } from "../components/expense-form-sidesheet";
 import { formatCurrency, formatDate } from "../components/expense-utils";
 import { ExpensesSnapshotTab } from "../components/expenses-snapshot-tab";
 import { ExpenseBudgetsTab } from "../components/expense-budgets-tab";
 import RecurringExpensesPanel from "../components/recurring-expenses-panel";
 
-type Form = "modal" | "sidesheet";
+type Form = "sidesheet"; // R22: the modal is retired
 
-function mountForm(form: Form) {
+function mountForm(_form: Form) {
   const props = { businessId: BUSINESS, categories: [], editingExpense: null, onClose: vi.fn(), onSaved: vi.fn() };
-  return render(form === "modal" ? <ExpenseFormModal {...props} /> : <ExpenseFormSideSheet {...props} />);
+  return render(<ExpenseFormSideSheet {...props} />);
 }
 
 beforeEach(() => {
@@ -90,7 +92,7 @@ describe("BUG-027: a USD business sees USD on the expense screens, never TTD", (
     expect(formatCurrency(150)).toMatch(/TTD/);
   });
 
-  it.each<Form>(["modal", "sidesheet"])("the %s names USD on its amount field and nowhere TTD", (form) => {
+  it.each<Form>(["sidesheet"])("the %s names USD on its amount field and nowhere TTD", (form) => {
     const { container } = mountForm(form);
     fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "86.4" } });
     expect(screen.getByText(/Amount \(USD\)/)).toBeTruthy();
@@ -132,7 +134,7 @@ describe("BUG-028: the new expense's date is today in Trinidad", () => {
   // 21:00 on 25 November in Port of Spain (UTC-4) is 01:00 on 26 November UTC.
   const EVENING = new Date("2026-11-26T01:00:00.000Z");
 
-  it.each<Form>(["modal", "sidesheet"])("the %s at 21:00 in Port of Spain defaults to 2026-11-25, not the UTC date", (form) => {
+  it.each<Form>(["sidesheet"])("the %s at 21:00 in Port of Spain defaults to 2026-11-25, not the UTC date", (form) => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(EVENING);
     const { container } = mountForm(form);
@@ -141,7 +143,7 @@ describe("BUG-028: the new expense's date is today in Trinidad", () => {
     expect(date.value).toBe("2026-11-25");
   });
 
-  it.each<Form>(["modal", "sidesheet"])("the %s at 10:00 in Port of Spain defaults to that same day", (form) => {
+  it.each<Form>(["sidesheet"])("the %s at 10:00 in Port of Spain defaults to that same day", (form) => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-11-25T14:00:00.000Z"));
     const { container } = mountForm(form);
@@ -211,7 +213,7 @@ describe("COR-F2: a stored instant is shown as its day in the business zone; a c
 });
 
 describe("COR-F5: a business in another zone gets its own today", () => {
-  it.each<Form>(["modal", "sidesheet"])("the %s of a Tokyo business at 16:00 UTC defaults to the next day in Tokyo", (form) => {
+  it.each<Form>(["sidesheet"])("the %s of a Tokyo business at 16:00 UTC defaults to the next day in Tokyo", (form) => {
     cachedBusiness.value = { id: BUSINESS, name: "Tokyo Co", currency: "JPY", timezone: "Asia/Tokyo" };
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-11-25T16:00:00.000Z"));
@@ -234,7 +236,7 @@ describe("COR-F5: a business in another zone gets its own today", () => {
 });
 
 describe("SEC-EXH2-1: another business's cached currency never labels this business's form", () => {
-  it.each<Form>(["modal", "sidesheet"])("the %s for business X, with Y (USD) cached, does not say USD", (form) => {
+  it.each<Form>(["sidesheet"])("the %s for business X, with Y (USD) cached, does not say USD", (form) => {
     cachedBusiness.value = { id: "biz_other_y", name: "Y Co", currency: "USD", timezone: "Asia/Tokyo" };
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-11-25T16:00:00.000Z"));

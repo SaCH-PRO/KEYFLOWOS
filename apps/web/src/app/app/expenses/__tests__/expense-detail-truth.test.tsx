@@ -49,7 +49,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("sonner", () => ({
   toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn(), message: vi.fn() }),
 }));
-vi.mock("@/lib/workspace", () => ({ getStoredBusinessId: () => BUSINESS }));
+vi.mock("@/lib/workspace", () => ({ BUSINESS_CHANGED_EVENT: "kf:business-changed", getStoredBusinessId: () => BUSINESS }));
 vi.mock("@/hooks/use-upload", () => ({ useUpload: () => ({ uploadFile: vi.fn(), isUploading: false, progress: 0 }) }));
 vi.mock("@/hooks/use-drive-upload", () => ({ useDriveUpload: () => ({ uploadToDrive: vi.fn(async () => true) }) }));
 vi.mock("@/lib/api", () => ({ API_BASE: "http://api.test" }));

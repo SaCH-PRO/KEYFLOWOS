@@ -517,22 +517,20 @@ describe('P233 WEDGE-HIDE-STORE-SERVER: storeCheckout flag and server-side check
         expect(getStore.body.business?.id).toBe(ID.bizStore);
         expect(getStore.body.products.map((p: any) => p.id)).toEqual([ID.prodStore]);
 
-        // 3. /gateways: 200 (never 500).
+        // 3. /gateways: fails closed to 403 STORE_CHECKOUT_NOT_OFFERED (never 500, P253).
         const gatewaysRes = await agent().get(`/site/storefront/public/${encodeURIComponent(SLUG.none)}/gateways?currency=TTD`);
-        expect(gatewaysRes.status, `${mode} GET /gateways: ${gatewaysRes.text}`).toBe(200);
-        expect(Array.isArray(gatewaysRes.body)).toBe(true);
-        expect(gatewaysRes.body.length).toBeGreaterThan(0);
+        expect(gatewaysRes.status, `${mode} GET /gateways: ${gatewaysRes.text}`).toBe(403);
+        expect(gatewaysRes.body?.code).toBe('STORE_CHECKOUT_NOT_OFFERED');
 
-        // 4. /validate-promo: 201 (NestJS @Post default, never 500).
+        // 4. /validate-promo: fails closed to 403 STORE_CHECKOUT_NOT_OFFERED (never 500, P253).
         const promoRes = await agent()
           .post(`/site/storefront/public/${encodeURIComponent(SLUG.none)}/validate-promo`)
           .send({
             code: 'LAUNCH10',
             items: [{ productId: ID.prodNone, quantity: 1 }],
           });
-        expect(promoRes.status, `${mode} POST /validate-promo: ${promoRes.text}`).toBe(201);
-        expect(promoRes.body.valid).toBe(true);
-        expect(promoRes.body.total).toBe(90);
+        expect(promoRes.status, `${mode} POST /validate-promo: ${promoRes.text}`).toBe(403);
+        expect(promoRes.body?.code).toBe('STORE_CHECKOUT_NOT_OFFERED');
 
         // 5. /checkout on legacy store business: fails closed to 403 STORE_CHECKOUT_NOT_OFFERED (never 500, zero writes).
         const checkoutRes = await agent()

@@ -12,7 +12,14 @@ import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-sco
 import { PrismaService } from '../../core/prisma/prisma.service';
 import type { AuthenticatedUser } from '../../core/decorators/current-user.decorator';
 import { ReceivablesService } from './receivables.service';
-import { LedgerBalanceService, isDateOnly, looksDateOnly } from './ledger-balance.service';
+import {
+  LedgerBalanceService,
+  MAX_GENERAL_LEDGER_PAGE,
+  MAX_GENERAL_LEDGER_PAGE_SIZE,
+  isDateOnly,
+  isValidPostgresTimestamp,
+  looksDateOnly,
+} from './ledger-balance.service';
 import { FinanceOverviewService } from './finance-overview.service';
 import { FinanceAccountsService, type CreateAccountInput, type UpdateAccountInput } from './finance-accounts.service';
 import { FinanceCoaService, type CreateCoaInput, type UpdateCoaInput } from './finance-coa.service';
@@ -237,28 +244,59 @@ export class FinanceController {
   async getGeneralLedger(
     @Param('businessId') businessId: string,
     @Req() req: Request,
-    @Query('accountId') accountId?: string,
-    @Query('from') from?: string,
-    @Query('to') to?: string,
-    @Query('page') page?: string,
-    @Query('pageSize') pageSize?: string,
+    @Query('accountId') accountId?: string | string[],
+    @Query('from') from?: string | string[],
+    @Query('to') to?: string | string[],
+    @Query('page') page?: string | string[],
+    @Query('pageSize') pageSize?: string | string[],
   ) {
     await this.ensureAccess((req as any).user.id, businessId);
-    // V1-66 (SWP-FIN-LEDGER, BUG-029): a date-only `to` (YYYY-MM-DD) goes to
-    // the service as the day it names, which covers the whole of it in the
-    // business's timezone; it was turned into midnight UTC here, so the
-    // service could not tell it from a timestamp and dropped the day. A
-    // date-only value that is not on the calendar (2026-02-31) is refused.
-    // Anything else is a timestamp, as before (`<=`).
-    const toDay = looksDateOnly(to) ? to : undefined;
+    const singleString = (v: string | string[] | undefined, label: string): string | undefined => {
+      if (v === undefined) return undefined;
+      if (typeof v !== 'string') throw new BadRequestException(`Invalid ${label}`);
+      return v;
+    };
+    const safeAccountId = singleString(accountId, 'accountId');
+    if (safeAccountId !== undefined && safeAccountId.trim().length === 0) {
+      throw new BadRequestException('Invalid accountId');
+    }
+    const rawFrom = singleString(from, 'from date');
+    const rawTo = singleString(to, 'to date');
+    const rawPage = singleString(page, 'page');
+    const rawPageSize = singleString(pageSize, 'pageSize');
+
+    // FU-LEDGER-ZONED-FROM + V1-66 (SWP-FIN-LEDGER, BUG-029): date-only `from`
+    // and `to` (YYYY-MM-DD) pass as calendar days interpreted in the business's
+    // timezone (`>= startOfZonedDay(from)` and `< endOfZonedDay(to)`) so
+    // adjacent single-day views never overlap; impossible calendar dates
+    // (2026-02-31) and out-of-range timestamps return 400.
+    const fromDay = looksDateOnly(rawFrom) ? rawFrom : undefined;
+    if (fromDay !== undefined && !isDateOnly(fromDay)) throw new BadRequestException('Invalid from date');
+    const toDay = looksDateOnly(rawTo) ? rawTo : undefined;
     if (toDay !== undefined && !isDateOnly(toDay)) throw new BadRequestException('Invalid to date');
+
+    const parseTimestamp = (raw: string | undefined, day: string | undefined, label: string): Date | undefined => {
+      if (raw === undefined || day !== undefined) return undefined;
+      const d = new Date(raw);
+      if (!isValidPostgresTimestamp(d)) throw new BadRequestException(`Invalid ${label}`);
+      return d;
+    };
+    const parseStrictInt = (raw: string | undefined, min: number, max: number, label: string): number | undefined => {
+      if (raw === undefined) return undefined;
+      if (!/^\d+$/.test(raw)) throw new BadRequestException(`Invalid ${label}`);
+      const n = Number(raw);
+      if (!Number.isSafeInteger(n) || n < min || n > max) throw new BadRequestException(`Invalid ${label}`);
+      return n;
+    };
+
     return this.ledgerBalance.getGeneralLedger(businessId, {
-      accountId,
-      from: from ? (() => { const d = new Date(from); if (Number.isNaN(d.getTime())) throw new BadRequestException('Invalid from date'); return d; })() : undefined,
-      to: to && toDay === undefined ? (() => { const d = new Date(to); if (Number.isNaN(d.getTime())) throw new BadRequestException('Invalid to date'); return d; })() : undefined,
+      accountId: safeAccountId,
+      from: parseTimestamp(rawFrom, fromDay, 'from date'),
+      fromDay,
+      to: parseTimestamp(rawTo, toDay, 'to date'),
       toDay,
-      page: page ? (() => { const n = parseInt(page, 10); if (Number.isNaN(n)) throw new BadRequestException('Invalid page'); return n; })() : undefined,
-      pageSize: pageSize ? (() => { const n = parseInt(pageSize, 10); if (Number.isNaN(n)) throw new BadRequestException('Invalid pageSize'); return n; })() : undefined,
+      page: parseStrictInt(rawPage, 1, MAX_GENERAL_LEDGER_PAGE, 'page'),
+      pageSize: parseStrictInt(rawPageSize, 1, MAX_GENERAL_LEDGER_PAGE_SIZE, 'pageSize'),
     });
   }
 

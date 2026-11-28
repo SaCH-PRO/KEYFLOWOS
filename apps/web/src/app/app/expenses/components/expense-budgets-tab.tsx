@@ -6,7 +6,7 @@ import { Plus, Trash2, Target, AlertTriangle, X, TrendingUp, TrendingDown, Calen
 import { EmptyState } from "@/components/ui/empty-state";
 import { toast } from "sonner";
 import { ExpenseBudget, ExpenseCategory, ExpenseSummary, Expense, upsertExpenseBudget, deleteExpenseBudget } from "@/lib/client";
-import { businessCurrency, formatCurrency } from "./expense-utils";
+import { businessCurrency, formatCurrency, useShownBusiness, refusedStart, canStartFor, writeFailure } from "./expense-utils";
 
 interface ExpenseBudgetsTabProps {
   businessId: string;
@@ -15,11 +15,24 @@ interface ExpenseBudgetsTabProps {
   expenses: Expense[];
   summary: ExpenseSummary | null;
   onReload: () => void;
+  /** R12: the data hook's check that the business an action was for is still the one shown. */
+  isCurrentBusiness?: (businessId: string) => boolean;
 }
 
-export function ExpenseBudgetsTab({ businessId, budgets, categories, expenses: _expenses, summary: _summary, onReload }: ExpenseBudgetsTabProps) {
+export function ExpenseBudgetsTab({ businessId, budgets, categories, expenses: _expenses, summary: _summary, onReload, isCurrentBusiness: hookCheck }: ExpenseBudgetsTabProps) {
+  const shownCheck = useShownBusiness(businessId);
+  const isCurrentBusiness = hookCheck ?? shownCheck;
+  // R19-5: every reply is judged by the start check's test (the given check, and the stored id).
+  const live = () => canStartFor(businessId, isCurrentBusiness);
   const [showBudgetModal, setShowBudgetModal] = useState(false);
   const [budgetForm, setBudgetForm] = useState({ categoryId: "", amount: "", alertAt: "80" });
+  // R14-6: a budget modal opened for one business closes, and its form clears, when the tab shows another.
+  const [modalFor, setModalFor] = useState(businessId);
+  if (modalFor !== businessId) {
+    setModalFor(businessId);
+    setShowBudgetModal(false);
+    setBudgetForm({ categoryId: "", amount: "", alertAt: "80" });
+  }
 
   const dayOfMonth = new Date().getDate();
   const daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
@@ -32,23 +45,37 @@ export function ExpenseBudgetsTab({ businessId, budgets, categories, expenses: _
 
   const handleSaveBudget = async () => {
     if (!budgetForm.amount) return;
+    if (refusedStart(businessId, isCurrentBusiness)) return;
     const now = new Date();
     try {
-      await upsertExpenseBudget(businessId, {
+      const res = await upsertExpenseBudget(businessId, {
         categoryId: budgetForm.categoryId || undefined,
         amount: parseFloat(budgetForm.amount),
         month: now.getMonth() + 1, year: now.getFullYear(),
         alertAt: parseFloat(budgetForm.alertAt) || 80,
       });
+      // R12: answered after a switch to another business: nothing is said or reloaded there.
+      if (!live()) return;
+      // R24-1: a refused save is said and the form stays open.
+      const failure = writeFailure(res, "save this budget");
+      if (failure) { toast.error(failure); return; }
       setShowBudgetModal(false);
       setBudgetForm({ categoryId: "", amount: "", alertAt: "80" });
       toast.success("Budget saved");
       onReload();
-    } catch { toast.error("Failed to save budget"); }
+    } catch { if (live()) toast.error("Failed to save budget"); }
   };
 
   const handleDeleteBudget = async (budgetId: string) => {
-    try { await deleteExpenseBudget(businessId, budgetId); toast.success("Budget deleted"); onReload(); } catch { toast.error("Failed to delete budget"); }
+    if (refusedStart(businessId, isCurrentBusiness)) return;
+    try {
+      const res = await deleteExpenseBudget(businessId, budgetId);
+      if (!live()) return;
+      const failure = writeFailure(res, "delete this budget");
+      if (failure) { toast.error(failure); return; }
+      toast.success("Budget deleted");
+      onReload();
+    } catch { if (live()) toast.error("Failed to delete budget"); }
   };
 
   return (

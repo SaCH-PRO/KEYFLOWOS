@@ -2,6 +2,7 @@ import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { readVisibleActivityPage, resolveTimelineViewer, type TimelineViewer } from '../timeline/timeline-visibility';
 import { contactWhereWithId } from './crm.helpers';
+import { formatNoteEventPreview, hydrateNoteCreatedEvents } from './crm-timeline.service';
 
 type HealthMetrics = {
   engagement: number;
@@ -355,6 +356,14 @@ export class CrmJourneyService {
       }),
     ]);
 
+    const hydratedEvents = await hydrateNoteCreatedEvents(
+      this.prisma,
+      businessId,
+      contactId,
+      events,
+      notes,
+    );
+
     const timeline: CrossJourneyItem[] = [];
     const trackedEventEntityIds = new Set<string>();
 
@@ -367,7 +376,7 @@ export class CrmJourneyService {
       timestamp: contact.createdAt.toISOString(),
     });
 
-    for (const ev of events) {
+    for (const ev of hydratedEvents) {
       const data = ev.data as Record<string, unknown> | null;
       let module: CrossJourneyItem['module'] = 'crm';
       if (ev.type.startsWith('invoice.') || ev.type.startsWith('quote.') || ev.type.startsWith('payment.')) module = 'commerce';
@@ -379,9 +388,10 @@ export class CrmJourneyService {
         description = `${data.from} → ${data.to}`;
       } else if (ev.type === 'invoice.paid' && data?.amount) {
         description = `TTD ${Number(data.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
-      } else if (ev.type === 'note.created' && data?.noteId) {
-        const note = notes.find(n => n.id === data.noteId);
-        if (note) description = note.body.length > 80 ? note.body.slice(0, 80) + '...' : note.body;
+      } else if (ev.type === 'note.created' && typeof data?.kind !== 'string' && data?.noteId) {
+        if (typeof data.description === 'string' && data.description.length > 0) {
+          description = data.description;
+        }
       } else if ((ev.type === 'task.created' || ev.type === 'task.completed') && data?.title) {
         description = String(data.title);
       }
@@ -430,12 +440,13 @@ export class CrmJourneyService {
 
     for (const note of notes) {
       if (trackedEventEntityIds.has(`note_${note.id}`)) continue;
+      const preview = formatNoteEventPreview(note.body);
       timeline.push({
         id: `note_${note.id}`,
         module: 'crm',
         type: 'note.created',
         title: 'Note added',
-        description: note.body.length > 80 ? note.body.slice(0, 80) + '...' : note.body,
+        description: preview.length > 0 ? preview : undefined,
         timestamp: note.createdAt.toISOString(),
       });
     }

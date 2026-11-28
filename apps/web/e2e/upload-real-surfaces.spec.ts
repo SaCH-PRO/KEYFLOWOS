@@ -9,11 +9,16 @@ import { test, expect, type Route } from "@playwright/test";
  *   1. Avatar upload  — `personal-info-section.tsx`
  *      POST /uploads/request-url  → PUT uploadURL → PATCH /identity/me
  *
- *   2. Expense receipt — `expense-form-modal.tsx`
+ *   2. Expense receipt — `expense-form-sidesheet.tsx` (`ExpenseFormSideSheet`,
+ *      the form production mounts; EXPENSES-HUB-3 R22 retired the
+ *      `ExpenseFormModal` this test drove before)
  *      POST /businesses/:id/uploads/request-url → PUT uploadUrl
- *      (note: this surface uses a *different* presign route shape than
- *      the rest of the app — it returns `{uploadUrl, publicUrl}` rather
- *      than `{uploadURL, objectPath}`)
+ *      (note: this describes a *different* presign route shape than
+ *      the rest of the app — `{uploadUrl, publicUrl}` rather than
+ *      `{uploadURL, objectPath}`. The sheet, like the modal before it,
+ *      uploads through `useUpload` (`/uploads/request-url`), so this mock
+ *      and its presign assertion are stale; P236 owns bringing this spec
+ *      green, and R22 changes only the surface it mounts.)
  *
  *   3. Social composer media — `post-composer.tsx`
  *      POST /uploads/request-url → PUT uploadURL → exposed via mediaUrls
@@ -168,7 +173,7 @@ test.describe("Real upload surfaces — bespoke presigned-PUT flows", () => {
     await expect(page.getByTestId("saved-avatar")).toHaveText(objectPath);
   });
 
-  test("expense receipt upload (ExpenseFormModal) presigns and PUTs the file", async ({
+  test("expense receipt upload (ExpenseFormSideSheet) presigns and PUTs the file", async ({
     page,
   }) => {
     const businessId = "biz_e2e_expense_fixture";
@@ -200,14 +205,15 @@ test.describe("Real upload surfaces — bespoke presigned-PUT flows", () => {
     await expect(page.getByTestId("fixture-title")).toBeVisible();
 
     const fileBytes = Buffer.from("%PDF-1.4 fake receipt", "utf8");
-    await page.locator('input[type="file"]').setInputFiles({
+    // The sheet offers Take photo (camera capture) and Upload file; a PDF goes through Upload file's own input.
+    await page.getByLabel("Upload file").setInputFiles({
       name: "receipt.pdf",
       mimeType: "application/pdf",
       buffer: fileBytes,
     });
 
-    // The "Receipt attached" badge appears once the bespoke upload finishes
-    // and writes the publicUrl back into the modal's form state.
+    // The "Receipt attached" badge appears once the upload finishes
+    // and writes the uploaded path back into the sheet's form state.
     await expect(page.getByText("Receipt attached")).toBeVisible({
       timeout: 10_000,
     });

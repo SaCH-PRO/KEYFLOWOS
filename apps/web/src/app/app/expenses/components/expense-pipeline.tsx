@@ -12,6 +12,7 @@ import { FileText } from "lucide-react";
 import type { Expense, ExpenseCategory, ExpenseSummary } from "@/lib/client";
 import { deleteExpense, updateExpense } from "@/lib/client";
 import type { ProjectOption, ContactOption, ServiceOption } from "./use-expenses-data";
+import { refusedStart, useShownBusiness, canStartFor, writeFailure } from "./expense-utils";
 
 interface ExpensePipelineProps {
   businessId: string | null;
@@ -44,6 +45,8 @@ interface ExpensePipelineProps {
   contacts?: ContactOption[];
   services?: ServiceOption[];
   loading?: boolean;
+  /** R12: the data hook's check that the business an action was for is still the one shown. */
+  isCurrentBusiness?: (businessId: string) => boolean;
 }
 
 export function ExpensePipeline({
@@ -67,7 +70,12 @@ export function ExpensePipeline({
   onReload,
   onEdit,
   onAdd,
+  isCurrentBusiness: hookCheck,
 }: ExpensePipelineProps) {
+  const shownCheck = useShownBusiness(businessId);
+  const isCurrentBusiness = hookCheck ?? shownCheck;
+  // R19-5: every reply is judged by the start check's test (the given check, and the stored id).
+  const live = () => canStartFor(businessId, isCurrentBusiness);
   const searchParams = useSearchParams();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [_actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
@@ -131,29 +139,43 @@ export function ExpensePipeline({
 
   const handleMarkPaid = async (expense: Expense) => {
     if (!businessId) return;
+    if (refusedStart(businessId, isCurrentBusiness)) return;
     setActionLoading((prev) => ({ ...prev, [`paid-${expense.id}`]: true }));
     try {
-      await updateExpense(businessId, expense.id, { status: "PAID", paidAt: new Date().toISOString() });
+      const res = await updateExpense(businessId, expense.id, { status: "PAID", paidAt: new Date().toISOString() });
+      // R12: answered after a switch to another business: nothing is said or reloaded there.
+      if (!live()) return;
+      // R24-1: the client answers a refusal as { error }; it is said, never reported as paid.
+      const failure = writeFailure(res, "mark this bill paid");
+      if (failure) { toast.error(failure); return; }
       toast.success("Bill marked as paid");
       onReload();
     } catch {
-      toast.error("Failed to mark as paid");
+      if (live()) toast.error("Failed to mark as paid");
+    } finally {
+      setActionLoading((prev) => ({ ...prev, [`paid-${expense.id}`]: false }));
     }
-    setActionLoading((prev) => ({ ...prev, [`paid-${expense.id}`]: false }));
   };
 
   const handleDelete = async (expense: Expense) => {
     if (!businessId) return;
+    if (refusedStart(businessId, isCurrentBusiness)) return;
     if (!window.confirm("Delete this expense?")) return;
+    // R18-1: the confirm blocked this tab: a switch made while it was open is seen only now.
+    if (refusedStart(businessId, isCurrentBusiness)) return;
     setActionLoading((prev) => ({ ...prev, [`delete-${expense.id}`]: true }));
     try {
-      await deleteExpense(businessId, expense.id);
+      const res = await deleteExpense(businessId, expense.id);
+      if (!live()) return;
+      const failure = writeFailure(res, "delete this expense");
+      if (failure) { toast.error(failure); return; }
       toast.success("Expense deleted");
       onReload();
     } catch {
-      toast.error("Failed to delete");
+      if (live()) toast.error("Failed to delete");
+    } finally {
+      setActionLoading((prev) => ({ ...prev, [`delete-${expense.id}`]: false }));
     }
-    setActionLoading((prev) => ({ ...prev, [`delete-${expense.id}`]: false }));
   };
 
   const hasSelection = selectedIds.size > 0;
