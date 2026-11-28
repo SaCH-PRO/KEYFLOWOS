@@ -191,3 +191,60 @@ test('the woken session gets a bounded allowlist, not a permission bypass', () =
     assert.ok(text.includes(allowed), `allowlist must cover ${allowed}`);
   }
 });
+
+test('the recorded #80 cursor fixture exists and drives idempotent directive selection', () => {
+  const fixturePath = path.resolve('scripts/agent-control/tests/fixtures/issue-80-cursor.json');
+  assert.ok(fs.existsSync(fixturePath), `recorded #80 fixture must exist at ${fixturePath}`);
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-cursor-fixture-'));
+  try {
+    const cursorFile = path.join(root, 'cursor.json');
+    const selector = path.resolve('scripts/agent-control/select-directive.mjs');
+
+    const first = spawnSync(
+      process.execPath,
+      [selector, `--comments-file=${fixturePath}`, `--cursor-file=${cursorFile}`, '--authorized-authors=SaCH-PRO'],
+      { encoding: 'utf8' },
+    );
+    assert.equal(first.status, 0, first.stderr || first.stdout);
+    const firstOut = JSON.parse(first.stdout);
+    assert.ok(firstOut.selected && firstOut.selected.message_id, 'fixture must yield an actionable directive before cursor update');
+
+    fs.writeFileSync(
+      cursorFile,
+      JSON.stringify({ processed_message_ids: [firstOut.selected.message_id], last_processed_at: new Date().toISOString() }),
+      'utf8',
+    );
+
+    const second = spawnSync(
+      process.execPath,
+      [selector, `--comments-file=${fixturePath}`, `--cursor-file=${cursorFile}`, '--authorized-authors=SaCH-PRO'],
+      { encoding: 'utf8' },
+    );
+    assert.equal(second.status, 0, second.stderr || second.stdout);
+    const secondOut = JSON.parse(second.stdout);
+    assert.equal(secondOut.selected, null, 'recording the selected directive in cursor.json must suppress re-selection');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('in CI (CI=true) without PowerShell, the cursor proof fails closed instead of skipping', () => {
+  const env = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (k.toUpperCase() === 'PATH' || k === 'KF_REQUIRE_POWERSHELL' || k === 'NODE_TEST_CONTEXT') continue;
+    env[k] = v;
+  }
+  env.CI = 'true';
+  env.PATH = '';
+
+  const run = spawnSync(
+    process.execPath,
+    ['--test', '--test-name-pattern=^the cursor makes directive processing idempotent$', path.resolve('scripts/agent-control/tests/worker.spec.mjs')],
+    { encoding: 'utf8', env, timeout: 60000 },
+  );
+  const out = `${run.stdout}\n${run.stderr}`;
+  assert.notEqual(run.status, 0, `CI=true with no PowerShell must fail closed instead of skipping; got exit 0:\n${out}`);
+  assert.ok(!/skipped\s+[1-9]/.test(out), `cursor proof must not be skipped in CI=true:\n${out}`);
+});
+
