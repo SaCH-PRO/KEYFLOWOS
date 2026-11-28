@@ -678,14 +678,31 @@ describe('W11-D116-KEY-OWNER (D-116, D-125): PUT agent/triggers — owner-run de
     await resetTriggers();
     const defBefore = await triggerRowText(defaultTriggerId(ID.bizS));
     const ownBefore = await triggerRowText(memberTriggerId(ID.bizS));
-    const def = await putTrigger(ID.recStaff, ID.bizS, defaultTriggerId(ID.bizS), { enabled: true });
-    expect(def.status, describeBody(def)).toBe(403);
-    expect(codeOf(def)).toContain('AGENT_TRIGGER_OWNER_ONLY');
-    const sched = await putTrigger(ID.recStaff, ID.bizS, memberTriggerId(ID.bizS), { schedule: '0 9 * * *' });
-    expect(sched.status, describeBody(sched)).toBe(403);
-    expect(codeOf(sched)).toContain('AGENT_TRIGGER_SCHEDULE_OWNER_ONLY');
-    expect(await triggerRowText(defaultTriggerId(ID.bizS))).toBe(defBefore);
-    expect(await triggerRowText(memberTriggerId(ID.bizS))).toBe(ownBefore);
+    // SWP-CENSUS-KEY-A (V1-64): default STAFF (ai:none) is refused at ModuleScopeGuard before reaching the controller.
+    const ungranted = await putTrigger(ID.recStaff, ID.bizS, defaultTriggerId(ID.bizS), { enabled: true });
+    expect(ungranted.status, describeBody(ungranted)).toBe(403);
+    expect(String(ungranted.body?.message ?? '')).toMatch(/ai requires write access/);
+    // Even with explicit ai:write, the recorded owner holding STAFF is still refused by the D-116 owner-only trigger rules.
+    const { defaultScopesForRole } = await import('../src/core/authority/module-vocabulary');
+    await db.membership.update({
+      where: { userId_businessId: { userId: ID.recStaff, businessId: ID.bizS } },
+      data: { permissionScopes: { ...defaultScopesForRole('STAFF'), ai: 'write' } },
+    });
+    try {
+      const def = await putTrigger(ID.recStaff, ID.bizS, defaultTriggerId(ID.bizS), { enabled: true });
+      expect(def.status, describeBody(def)).toBe(403);
+      expect(codeOf(def)).toContain('AGENT_TRIGGER_OWNER_ONLY');
+      const sched = await putTrigger(ID.recStaff, ID.bizS, memberTriggerId(ID.bizS), { schedule: '0 9 * * *' });
+      expect(sched.status, describeBody(sched)).toBe(403);
+      expect(codeOf(sched)).toContain('AGENT_TRIGGER_SCHEDULE_OWNER_ONLY');
+      expect(await triggerRowText(defaultTriggerId(ID.bizS))).toBe(defBefore);
+      expect(await triggerRowText(memberTriggerId(ID.bizS))).toBe(ownBefore);
+    } finally {
+      await db.membership.update({
+        where: { userId_businessId: { userId: ID.recStaff, businessId: ID.bizS } },
+        data: { permissionScopes: null },
+      });
+    }
   });
 
   it('control (D-125): the co-owner of bizA and the OWNER-holding recorded owner of bizO switch on their owner-run default rule and schedule a member\'s rule (200, written); the default still records no member', async () => {

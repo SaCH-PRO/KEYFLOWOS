@@ -3,6 +3,8 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyCortexEndocrineService } from './key-cortex-endocrine.service';
 import { keyCronsDisabled } from '../../core/config/env';
+import { RedisService } from '../../core/redis/redis.service';
+import { claimOccurrence, utcHourSlot } from '../../core/scheduling/occurrence-claim';
 import type { CanonicalModule } from '../../core/authority/module-vocabulary';
 import { EVENT_MODULES, type ModuleSight } from './key-cortex-prompt-context.service';
 import {
@@ -170,6 +172,7 @@ export class KeyCortexSalienceService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Optional() private readonly endocrine?: KeyCortexEndocrineService,
+    @Optional() @Inject(RedisService) private readonly redis?: RedisService,
   ) {}
 
   /**
@@ -180,6 +183,7 @@ export class KeyCortexSalienceService {
   async scheduledAppraisal(): Promise<void> {
     // V1-24: KEY_DISABLED (or DISABLE_SCHEDULERS) stops this job before it reads anything.
     if (keyCronsDisabled()) return;
+    if (!(await claimOccurrence(this.redis, 'key-salience-appraisal', utcHourSlot(), 55 * 60 * 1000))) return;
     const businesses = await this.findAllActiveBusinesses();
     for (const businessId of businesses) {
       try {

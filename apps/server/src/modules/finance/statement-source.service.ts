@@ -34,7 +34,7 @@
  * and reconciliation would then "succeed" against the wrong book.
  */
 
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { GoogleDriveService } from '../google-drive/google-drive.service';
@@ -42,6 +42,8 @@ import { GmailService } from '../commerce/gmail.service';
 import { BankImportService, type BankImportResult } from './bank-import.service';
 import { detectFormat } from './bank-statement-parsers';
 import { schedulersDisabled } from '../../core/config/env';
+import { RedisService } from '../../core/redis/redis.service';
+import { claimOccurrence, utcDateSlot } from '../../core/scheduling/occurrence-claim';
 
 /** Where an account's statements come from, if anywhere. */
 export interface StatementSources {
@@ -101,6 +103,7 @@ export class StatementSourceService {
     @Inject(GoogleDriveService) private readonly drive: GoogleDriveService,
     @Inject(GmailService) private readonly gmail: GmailService,
     @Inject(BankImportService) private readonly bankImport: BankImportService,
+    @Optional() @Inject(RedisService) private readonly redis?: RedisService,
   ) {}
 
   /* ── configuration ─────────────────────────────────────────────────── */
@@ -393,6 +396,7 @@ export class StatementSourceService {
   // ENABLE_SCHEDULERS_IN_TEST); the work below stays callable directly.
   async scheduledSweepAll(): Promise<void> {
     if (schedulersDisabled()) return;
+    if (!(await claimOccurrence(this.redis, 'statement-source-sweep', utcDateSlot(), 23 * 60 * 60 * 1000))) return;
     await this.sweepAll();
   }
 
