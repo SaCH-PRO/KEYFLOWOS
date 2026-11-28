@@ -355,6 +355,60 @@ describe('RR-GATE-LEDGER-MONOTONIC: monotonic comparison across git commits', ()
       fs.rmSync(absentConst.dir, { recursive: true, force: true });
     }
 
+    // workflow-max-warnings absent at base (found 0) -> "new"; duplicate at base (found 2) -> fail closed
+    const absentWorkflowLint = initFixtureRepo(
+      {
+        raw: {
+          '.github/workflows/ci-cd.yml':
+            'jobs:\n  lint:\n    steps:\n      - run: pnpm --filter web lint --max-warnings 10\n',
+        },
+      },
+      {},
+    );
+    try {
+      const report = mod.compareRefs({
+        cwd: absentWorkflowLint.dir,
+        baseRef: absentWorkflowLint.baseSha,
+        headRef: absentWorkflowLint.headSha,
+      });
+      assert.equal(
+        report.ok,
+        true,
+        `expected missing workflow-max-warnings command at base (found 0) to be new, got: ${JSON.stringify(report)}`,
+      );
+      assert.ok(report.added.some((a) => a.name === 'lint.server_max_warnings' && a.status === 'new'));
+    } finally {
+      fs.rmSync(absentWorkflowLint.dir, { recursive: true, force: true });
+    }
+
+    const dupWorkflowLint = initFixtureRepo(
+      {
+        raw: {
+          '.github/workflows/ci-cd.yml':
+            'jobs:\n  lint:\n    steps:\n' +
+            '      - run: pnpm --filter server lint --max-warnings 10\n' +
+            '      - run: pnpm --filter server lint --max-warnings 20\n' +
+            '      - run: pnpm --filter web lint --max-warnings 10\n',
+        },
+      },
+      {},
+    );
+    try {
+      const report = mod.compareRefs({
+        cwd: dupWorkflowLint.dir,
+        baseRef: dupWorkflowLint.baseSha,
+        headRef: dupWorkflowLint.headSha,
+      });
+      assert.equal(
+        report.ok,
+        false,
+        `expected duplicate workflow-max-warnings command at base (found 2) to fail closed, got: ${JSON.stringify(report)}`,
+      );
+      assert.ok(report.errors.some((e) => e.includes('base') && e.includes('lint.server_max_warnings')));
+    } finally {
+      fs.rmSync(dupWorkflowLint.dir, { recursive: true, force: true });
+    }
+
     // Direct compare() with base parse errors fails closed
     const synthetic = mod.compare(
       { results: [], absent: [], errors: ['tenant.acknowledged_unscoped: parse failure'] },
