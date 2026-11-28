@@ -430,8 +430,11 @@ const UUID_CORRELATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0
  * so a wall-clock `.550Z` millisecond or hex UUID never false-positives on `/550/`.
  */
 function refusalBodyText(body: unknown): string {
-  if (!body || typeof body !== 'object' || Array.isArray(body) || Buffer.isBuffer(body)) {
-    return JSON.stringify(body);
+  if (Buffer.isBuffer(body)) {
+    return body.toString('utf8');
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return JSON.stringify(body) ?? '';
   }
   const rest: Record<string, unknown> = { ...(body as Record<string, unknown>) };
   if (typeof rest.timestamp === 'string' && ISO_UTC_TIMESTAMP.test(rest.timestamp)) {
