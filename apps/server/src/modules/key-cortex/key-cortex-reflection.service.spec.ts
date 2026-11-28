@@ -157,8 +157,21 @@ describe('KeyCortexReflectionService', () => {
   });
 
   describe('RR-REFLECTION-HONEST: honest maintenance reporting and bounded in-process dream journal', () => {
-    it('runMaintenance reports "not run: <reason>" instead of fake success and records indicesUpdated: null, integrityChecked: false', async () => {
-      const session = await service.runMaintenance('biz_honest');
+    it('runMaintenance reports "not run: <reason>" instead of fake success and persists indicesUpdated: null, integrityChecked: false', async () => {
+      const { service: svc, prisma } = makeService();
+      const persistedRows: Array<{ id: string; key: string; userId: null; value: string; createdAt: Date; businessId: string; type: string }> = [];
+      (prisma.client as Record<string, unknown>).keyCortexMemory = {
+        create: vi.fn().mockImplementation(async ({ data }: { data: { businessId: string; type: string; key: string; value: string } }) => {
+          const row = { id: `mem_${persistedRows.length}`, userId: null, createdAt: new Date(), ...data };
+          persistedRows.push(row);
+          return row;
+        }),
+        findFirst: vi.fn().mockImplementation(async ({ where }: { where: { businessId: string; type: string } }) => {
+          return [...persistedRows].reverse().find((r) => r.businessId === where.businessId && r.type === where.type) ?? null;
+        }),
+      };
+
+      const session = await svc.runMaintenance('biz_honest');
 
       expect(session.type).toBe('maintenance');
       expect(session.actionsTaken.some((a) => /updated\s+\d+\s+temporal memory indices/i.test(a))).toBe(false);
@@ -171,8 +184,9 @@ describe('KeyCortexReflectionService', () => {
       expect(session.metadata?.integrityChecked).toBe(false);
       expect(session.metadata?.integrityIssuesFound).toBeNull();
 
-      // getLastReflectionSession serves the same honest record to consciousness layer
-      const last = await service.getLastReflectionSession('biz_honest');
+      // Persisted record + getLastReflectionSession serve the same honest record to consciousness layer
+      expect(persistedRows).toHaveLength(1);
+      const last = await svc.getLastReflectionSession('biz_honest');
       expect(last?.actionsTaken).toEqual(session.actionsTaken);
       expect(last?.metadata?.indicesUpdated).toBeNull();
       expect(last?.metadata?.integrityChecked).toBe(false);
