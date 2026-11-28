@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { LEDGERS } from '../os/ledger-sizes.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const CLI = path.join(ROOT, 'scripts', 'ci', 'gate-ledger-monotonic.mjs');
@@ -35,6 +36,12 @@ function writeFile(root, rel, content) {
   fs.writeFileSync(full, content, 'utf8');
 }
 
+function stubDeclaration(ledger) {
+  if (ledger.kind === 'strings' || ledger.kind === 'array-elements') return `const ${ledger.constant} = [];`;
+  if (ledger.kind === 'number') return `const ${ledger.constant} = 0;`;
+  return `const ${ledger.constant} = {};`;
+}
+
 function makeFixtureFiles(overrides = {}) {
   const bidmEntries = Array.from({ length: overrides.businessIdModels ?? 310 }, (_, i) => `'Model${i}'`).join(', ');
   const ackUnscoped = (overrides.acknowledgedUnscoped ?? []).map((s) => `'${s}'`).join(', ');
@@ -42,7 +49,35 @@ function makeFixtureFiles(overrides = {}) {
   const knownDead = Array.from({ length: overrides.knownDead ?? 10 }, (_, i) => `'evt.${i}'`).join(', ');
   const floorPct = overrides.floorPct ?? 39;
 
-  const files = {
+  // Seed minimal valid stubs for every registered ledger so adding new shrink-only
+  // ledgers in ledger-sizes.mjs keeps the monotonic fixture repo complete.
+  const files = {};
+  const byFile = new Map();
+  for (const l of LEDGERS) {
+    if (!byFile.has(l.file)) byFile.set(l.file, []);
+    byFile.get(l.file).push(l);
+  }
+  for (const [rel, entries] of byFile) {
+    if (entries.every((e) => e.kind === 'workflow-max-warnings')) {
+      files[rel] =
+        'jobs:\n  lint:\n    steps:\n' +
+        entries.map((e) => `      - run: pnpm --filter ${e.workspace} lint --max-warnings 10`).join('\n') +
+        '\n';
+    } else if (entries.every((e) => e.kind === 'md-rows')) {
+      files[rel] = entries.map((e) => `${e.header}\n| --- |\n| stub |\n`).join('\n');
+    } else {
+      const seen = new Set();
+      const lines = [];
+      for (const e of entries) {
+        if (!e.constant || seen.has(e.constant)) continue;
+        seen.add(e.constant);
+        lines.push(stubDeclaration(e));
+      }
+      files[rel] = `${lines.join('\n')}\n`;
+    }
+  }
+
+  Object.assign(files, {
     'apps/server/src/core/prisma/tenant-model-list.spec.ts':
       `const ACKNOWLEDGED_UNSCOPED = [${ackUnscoped}];\nconst NEVER_SCOPE = [${neverScope}];\n`,
     'packages/db/src/client.ts':
@@ -60,14 +95,14 @@ function makeFixtureFiles(overrides = {}) {
     'apps/web/src/lib/__tests__/no-fabricated-screens.spec.ts':
       `const KNOWN_FABRICATED = [];\n`,
     'apps/server/src/trpc.module.spec.ts':
-      `const ACKNOWLEDGED_UNCHECKED = {};\n`,
+      `const ACKNOWLEDGED_UNCHECKED = {};\nconst BROKEN_BY_MISSING_CTX_BUSINESS = [];\n`,
     'apps/server/src/modules/ai/handler-coverage-ratchet.spec.ts':
       `const FLOOR_PCT = ${floorPct};\n`,
     'architecture/os/state/DOC_DEBT.md':
       `| doc | false claim | disproving command | disposition |\n| --- | --- | --- | --- |\n| a.md | x | cmd | open |\n`,
     'architecture/os/state/ROUTE_PARITY.md':
       `| path | client source | recorded |\n| --- | --- | --- |\n| /x | a.ts | 2026-01-01 |\n`,
-  };
+  });
 
   for (const [rel, val] of Object.entries(overrides.raw ?? {})) {
     if (val === null) delete files[rel];

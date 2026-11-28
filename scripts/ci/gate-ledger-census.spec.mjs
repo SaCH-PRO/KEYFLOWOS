@@ -49,6 +49,10 @@ export const EXEMPT = Object.freeze({
     'Integration test enforcing UNPRICED_ACKNOWLEDGED (already measured by billing.unpriced from plans.ts).',
   'scripts/ci/gate-ledger-census.spec.mjs':
     'This census spec itself (embeds the phrase pattern in its detector and negative controls).',
+  'scripts/ci/gate-ledger-monotonic.mjs':
+    'The CI monotonic ledger comparator itself (reads LEDGERS from ledger-sizes.mjs, not a debt ledger).',
+  'scripts/ci/gate-ledger-monotonic.spec.mjs':
+    'Test suite for gate-ledger-monotonic.mjs (constructs synthetic fixture repos, not a debt ledger).',
   'scripts/os/ledger-sizes.mjs':
     'The ledger registry itself (declares LEDGERS, not a debt ledger).',
   'scripts/proof-admission/manifests/shadowed-routes-live.json':

@@ -80,6 +80,7 @@ export const LEDGERS = [
   { name: 'web.nav_page_title_outside', file: 'apps/web/src/lib/__tests__/nav-labels-agree.spec.ts', constant: 'PAGE_TITLE_OUTSIDE_WRITE_SET', kind: 'object-keys', direction: 'shrink' },
   { name: 'web.nav_cockpit_label_outside', file: 'apps/web/src/lib/__tests__/nav-labels-agree.spec.ts', constant: 'COCKPIT_LABEL_OUTSIDE_WRITE_SET', kind: 'object-keys', direction: 'shrink' },
   { name: 'web.redirect_shadowed_acknowledged', file: 'apps/web/src/lib/__tests__/redirect-shadowing.spec.ts', constant: 'ACKNOWLEDGED_SHADOWED', kind: 'strings', direction: 'shrink' },
+  { name: 'routes.nav_service_check_inert_allowlist', file: 'apps/server/src/core/config/nav-route-scope-metadata.spec.ts', constant: 'SERVICE_CHECK_INERT_SCOPE_ALLOWLIST', kind: 'strings', direction: 'shrink' },
   { name: 'api.raw_record_debt', file: 'packages/api/src/no-raw-records.spec.ts', constant: 'RAW_RECORD_DEBT', kind: 'strings', direction: 'shrink' },
 ];
 
