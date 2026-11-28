@@ -112,6 +112,7 @@ async function cleanup() {
 const http = () => request(app.getHttpServer());
 /** The JSON body of an answer, also from a route that declares another content type (the CSV report). */
 const bodyOf = (res: request.Response): unknown => (res.body && Object.keys(res.body).length ? res.body : JSON.parse(res.text || '{}'));
+const refusalPayloadText = (res: Pick<request.Response, 'body' | 'text'>): string => res.text;
 const fin = (rest: string) => `/finance/businesses/${ID.biz}/${rest}`;
 const exp = (rest: string) => `/expenses/businesses/${ID.biz}/${rest}`;
 const bills = (rest: string) => `/finance/businesses/${ID.biz}/${rest}`;
@@ -341,7 +342,8 @@ describe('BRD-01: the Books reads need revenue read (D-146, SEC-P195BW-4)', () =
       const refused = await http().get(url).set(HEADER, who);
       expect(refused.status, `${who}: ${refused.text}`).toBe(403);
       expect(bodyOf(refused)).toMatchObject({ code: 'FORBIDDEN', message: REV_READ_NONE });
-      for (const f of FIGURES) expect(refused.text, `${who} sees ${f}`).not.toContain(f);
+      const payload = refusalPayloadText(refused);
+      for (const f of FIGURES) expect(payload, `${who} sees ${f}`).not.toContain(f);
     }
     for (const who of [ID.revRead, ID.owner, ID.saMember]) {
       const ok = await http().get(url).set(HEADER, who);
@@ -351,6 +353,22 @@ describe('BRD-01: the Books reads need revenue read (D-146, SEC-P195BW-4)', () =
     const outsider = await http().get(url).set(HEADER, ID.superAdmin);
     expect(outsider.status).toBe(403);
     expect(bodyOf(outsider)).toMatchObject({ code: 'FORBIDDEN', message: NOT_MEMBER });
+  });
+
+  it('BRD-01 determinism (FU-TEST-FLAKES-2026-11-23): ignores echoed path/correlationId envelope while still catching leaked figures', () => {
+    const cleanEnvelope = {
+      code: 'FORBIDDEN',
+      message: REV_READ_NONE,
+      path: `/finance/businesses/biz/accounts/cm${FIGURES[0]}xyz/bank-transactions`,
+      correlationId: `00000000-${FIGURES[1].slice(0, 4)}-4000-8000-000000${FIGURES[2]}`,
+    };
+    const stripped = refusalPayloadText({ body: cleanEnvelope, text: JSON.stringify(cleanEnvelope) });
+    for (const f of FIGURES) expect(stripped).not.toContain(f);
+
+    // Negative control: a figure leaked inside message/details/data or raw text MUST still be caught
+    const leakedBody = { ...cleanEnvelope, details: { balance: Number(FIGURES[0]) } };
+    expect(refusalPayloadText({ body: leakedBody, text: JSON.stringify(leakedBody) })).toContain(FIGURES[0]);
+    expect(refusalPayloadText({ body: {}, text: `raw refusal leaked ${FIGURES[3]}` })).toContain(FIGURES[3]);
   });
 
   it('BRD-01 control: the revenue reader is served the figures the refusal withholds', async () => {
