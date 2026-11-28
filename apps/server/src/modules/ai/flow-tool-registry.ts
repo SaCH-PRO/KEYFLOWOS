@@ -136,7 +136,7 @@ export const REVIEWED_NATURAL_MONEY_GUARDS: readonly ReviewedNaturalMoneyGuard[]
   {
     tool: 'commerce_mark_invoice_paid',
     guardFile: 'apps/server/src/modules/commerce/commerce.service.ts',
-    guardLine: 2063,
+    guardLine: 2115,
     reason: 'CommerceService.markInvoicePaidFor returns existing PAID invoice without writing payment/ledger rows and serializes concurrent calls on the invoice lock',
   },
   {
