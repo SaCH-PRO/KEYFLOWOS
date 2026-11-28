@@ -72,7 +72,7 @@
     "jose": "^5.10.0",
     "livekit-server-sdk": "^2.17.0",
     "mammoth": "^1.12.0",
-    "multer": "^1.4.5-lts.1",
+    "multer": "^2.5.0",
     "openai": "^4.96.0",
     "pdf-parse": "^1.1.1",
     "pdfkit": "^0.18.0",
