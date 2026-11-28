@@ -106,7 +106,7 @@ function isAbsenceError(ledger, err) {
   const msg = err instanceof Error ? err.message : String(err);
   if (ledger.kind === 'md-rows') return msg.startsWith('table header not found:');
   if (ledger.kind === 'workflow-max-warnings') {
-    return msg.startsWith('expected exactly 1 lint --max-warnings run line for workspace') && msg.endsWith('found 0');
+    return msg === `expected exactly 1 active pnpm lint --max-warnings command for workspace "${ledger.workspace}", found 0`;
   }
   return msg === `constant ${ledger.constant} not found`;
 }
