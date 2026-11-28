@@ -1,7 +1,7 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-28 ~08:45 UTC by the acting orchestrator (`session_017o9EBfFipLMDKriFTiae7Y`, Claude Code), after
-M46 merged. Main is `856abb03`. Rewrite in place on every merge, packet return or owner ruling; never append. What you
+Last written: 2026-11-28 ~10:20 UTC by the acting orchestrator (`session_017o9EBfFipLMDKriFTiae7Y`, Claude Code), while
+M47 is in proof. Main is `856abb03`. Rewrite in place on every merge, packet return or owner ruling; never append. What you
 remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -33,6 +33,12 @@ pushed `pkt/V1-*` branches. No local branch, worktree, log or agent of this sess
 waves are even-numbered, Antigravity's odd. Server follow-ups found in Claude reviews become Antigravity board rows.
 
 ### 0.1 Waves this session
+
+**Checkpoint 2026-11-28 10:20 UTC: M47 built and in proof** (`wave/v1-wave-m47` on main `856abb03`): P257 FU-SIDESHEET-CLOSE-DISABLED-CUE (`50ff357b`, R1 to R5 each CONFIRMED x2) + P261 FU-EXPENSE-DETAIL-ONSAVED-ORDER (`58f11422`) + P259 FU-EXPENSES-DATA-GUARD-PINS (`80658317`) + P254 FU-RECURRING-NO-BUSINESS-READ (`02042f7c`, R9 CONFIRMED x2) + docs. 13 code files.
+- **Why it is urgent:** M46 put a MAJOR regression on main. Typing in the expense sheet moved focus to the panel after every keystroke, because a new `onClose` each render re-ran the commerce SideSheet focus effect. P257 R1 fixes it with refs and a stable `close()`. R2 to R5 hardened its source pin, which now uses the TypeScript parser, follows barrels, and has a 10 s walk guard (2 s flaked under parallel load).
+- **Next wave (M48):** P258 FU-EXPENSES-DEAD-SURFACES-2 (`cef7044e`, CONFIRMED x2; with M47 it was 55 files, over the gate). P231 is in round 20 (R19 dropped conditions markers after sentence punctuation that follows currency, a closer or an attached symbol).
+- **New board rows:** P263 FU-SIDESHEET-LAYOUT-FLIP-FOCUS, P264 FU-RECURRING-EXIT-BUILDER-INERT.
+- **Speed tracker (D-320):** P257 about 1.7 h from first review to wave (5 rounds). P254 R6 to R9 took about 1.5 h today. One restart about 09:02 UTC, no proof lost.
 
 **Checkpoint 2026-11-28 08:45 UTC: M46 merged (#300, main `856abb03`): P256 FU-EXPENSE-EDIT-CANCEL-MID-SAVE + P252 FU-EXPENSES-DEAD-SURFACES + docs.**
 - Proof at `c7af5115` against `cd31a482`: Release 0 and release0-live passed; journeys H and J have no head-only failures; the receipt sweep passed. CI's one red shard was `[CFN-X01]`, an order-dependent server fixture test (board P260, server lane), which passed on its single re-run. Both wave confirmations were CONFIRMED.
