@@ -536,8 +536,9 @@ export class BookingsController {
     });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, PlanLimitGuard)
   @RequireModuleScope('bookings', 'write')
+  @RequirePlanLimit('staff')
   @Post('businesses/:businessId/staff')
   createStaff(
     @Param('businessId') businessId: string,

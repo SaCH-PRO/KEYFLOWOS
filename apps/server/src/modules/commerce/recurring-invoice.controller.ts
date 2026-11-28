@@ -4,6 +4,7 @@ import { OPERATOR_INVOICE_CONTACT_SELECT } from './commerce.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
+import { PlanLimitGuard, RequirePlanLimit } from '../subscriptions/plan-limit.guard';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import { TeamAuditInterceptor, AuditAction } from '../../core/interceptors/team-audit.interceptor';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -126,8 +127,9 @@ export class RecurringInvoiceController {
   // forwarded, so the service binds only a contact that member may open (a
   // hidden one is the 404 of an unknown id), and the body carries the
   // projected contact.
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, PlanLimitGuard)
   @RequireModuleScope('revenue', 'write')
+  @RequirePlanLimit('recurring_invoices')
   @UseInterceptors(TeamAuditInterceptor)
   @AuditAction('revenue', 'recurring_invoice_created', 'recurring_invoice')
   @Post('businesses/:businessId/recurring-invoices')

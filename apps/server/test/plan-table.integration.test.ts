@@ -39,30 +39,34 @@ let app: any;
 let subscriptionsService: any;
 
 async function cleanFixtures() {
-  const like = sqlLikePrefix(P);
-  await db.$executeRaw`DELETE FROM team_activity_logs WHERE business_id LIKE ${like}`;
-  await db.$executeRaw`DELETE FROM subscription_payments WHERE business_id LIKE ${like}`;
-  await db.$executeRaw`DELETE FROM subscriptions WHERE business_id LIKE ${like}`;
-  await db.$executeRaw`DELETE FROM recurring_invoices WHERE business_id LIKE ${like}`;
-  await db.$executeRaw`DELETE FROM invoice_items WHERE invoice_id IN (SELECT id FROM invoices WHERE business_id LIKE ${like})`;
-  await db.$executeRaw`DELETE FROM payments WHERE business_id LIKE ${like}`;
-  await db.$executeRaw`DELETE FROM invoices WHERE business_id LIKE ${like}`;
-  await db.$executeRaw`DELETE FROM marketplace_orders WHERE business_id LIKE ${like}`;
-  await db.$executeRaw`DELETE FROM bookings WHERE business_id LIKE ${like}`;
-  await db.$executeRaw`DELETE FROM services WHERE business_id LIKE ${like}`;
-  await db.$executeRaw`DELETE FROM staff_members WHERE business_id LIKE ${like}`;
-  await db.$executeRaw`DELETE FROM products WHERE business_id LIKE ${like}`;
-  await db.$executeRaw`DELETE FROM contacts WHERE business_id LIKE ${like}`;
-  await db.$executeRaw`DELETE FROM ledger_entries WHERE business_id LIKE ${like}`;
-  await db.$executeRaw`DELETE FROM chart_of_accounts WHERE business_id LIKE ${like}`;
-  await db.$executeRaw`DELETE FROM memberships WHERE business_id LIKE ${like} OR user_id LIKE ${like}`;
-  await db.$executeRaw`DELETE FROM businesses WHERE id LIKE ${like}`;
-  await db.$executeRaw`DELETE FROM users WHERE id LIKE ${like}`;
+  const stmts = [
+    `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM subscription_payments WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM subscriptions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM recurring_invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM invoice_items WHERE invoice_id IN (SELECT id FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)})`,
+    `DELETE FROM payments WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM bookings WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM services WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM staff_members WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM products WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM ledger_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM chart_of_accounts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)} OR owner_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
+  ];
+  for (const sql of stmts) {
+    await db.$executeRawUnsafe(sql);
+  }
 }
 
-async function seedBusiness(businessId: string, name: string) {
+async function seedBusiness(businessId: string, slugSuffix: string, name: string) {
   await db.business.create({
-    data: { id: businessId, name, slug: `${businessId}-slug`, ownerId: ID.owner },
+    data: { id: businessId, name, slug: `${P}${slugSuffix}`, ownerId: ID.owner },
   });
   await db.membership.create({
     data: { userId: ID.owner, businessId, role: 'OWNER' },
@@ -169,7 +173,7 @@ beforeAll(async () => {
       { provide: ExpensePostingService, useValue: { onProductSold: async () => null } },
       { provide: CrmService, useValue: { logContactEvent: async () => null } },
       { provide: CommerceStatsService, useValue: { invalidateCache: () => undefined } },
-      { provide: CatalogService, useValue: {} },
+      CatalogService,
       { provide: PublicEventsService, useValue: { attachVisitorToContact: async () => undefined, logStorefrontEvent: async () => undefined, backstitchVisitor: async () => undefined } },
       { provide: TimelineService, useValue: { recordEvent: async () => null } },
       { provide: TimeEntryService, useValue: {} },
@@ -212,12 +216,12 @@ beforeAll(async () => {
     data: { id: ID.owner, email: `${P}owner@example.test`, name: 'Plan Owner', role: 'USER' },
   });
 
-  await seedBusiness(ID.bizProducts, 'V66F Products');
-  await seedBusiness(ID.bizStaff, 'V66F Staff');
-  await seedBusiness(ID.bizBookings, 'V66F Bookings');
-  await seedBusiness(ID.bizRecurring, 'V66F Recurring');
-  await seedBusiness(ID.bizInvoices, 'V66F Invoices');
-  await seedBusiness(ID.bizCopy, 'V66F Copy');
+  await seedBusiness(ID.bizProducts, 'products-slug', 'V66F Products');
+  await seedBusiness(ID.bizStaff, 'staff-slug', 'V66F Staff');
+  await seedBusiness(ID.bizBookings, 'bookings-slug', 'V66F Bookings');
+  await seedBusiness(ID.bizRecurring, 'recurring-slug', 'V66F Recurring');
+  await seedBusiness(ID.bizInvoices, 'invoices-slug', 'V66F Invoices');
+  await seedBusiness(ID.bizCopy, 'copy-slug', 'V66F Copy');
 
   await db.contact.createMany({
     data: [
@@ -569,7 +573,7 @@ describe('V1-66 PLAN-TABLE (D-160, D-161, D-162, D-155)', () => {
     expect(byId.KEYFLOW.priceUSD).toBe(39);
     expect(byId.KEYFLOW.tagline).toMatch(/KEY assistant/i);
 
-    const regRes = await request(app.getHttpServer()).get('/subscriptions/features');
+    const regRes = await request(app.getHttpServer()).get('/subscriptions/feature-registry');
     expect(regRes.status).toBe(200);
     const { features, categories } = regRes.body;
 
@@ -608,7 +612,7 @@ describe('V1-66 PLAN-TABLE (D-160, D-161, D-162, D-155)', () => {
     // KEYFLOW billing dashboard treats 'Fair use' AI credits as uncapped (-1) until ENTITLE-001.
     await activatePlan(ID.bizCopy, 'KEYFLOW');
     const dashRes = await request(app.getHttpServer())
-      .get(`/subscriptions/businesses/${ID.bizCopy}/dashboard`)
+      .get(`/subscriptions/businesses/${ID.bizCopy}/billing-dashboard`)
       .set('x-test-user', ID.owner);
     expect(dashRes.status).toBe(200);
     expect(dashRes.body.aiUsage.isUnlimited).toBe(true);
