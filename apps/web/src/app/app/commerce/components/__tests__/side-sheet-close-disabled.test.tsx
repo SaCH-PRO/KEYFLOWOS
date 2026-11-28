@@ -7,8 +7,8 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { useState } from "react";
 import { render, screen, cleanup, fireEvent, act } from "@testing-library/react";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, readdirSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
 
 import { SideSheet } from "../side-sheet";
 
@@ -77,6 +77,8 @@ for (const layout of ["desktop", "phone"] as const) {
 
 describe("P257: the commerce SideSheet's other callers are unchanged", () => {
   const SRC = join(__dirname, "../../../../..");
+  const SHEET = join(SRC, "app/app/commerce/components/side-sheet");
+  const EXPENSE_SHEET = "app/app/expenses/components/expense-form-sidesheet.tsx";
   const CALLERS = [
     "components/ui/business-object-drawer.tsx",
     "app/app/finance/components/payment-record-modal.tsx",
@@ -86,15 +88,40 @@ describe("P257: the commerce SideSheet's other callers are unchanged", () => {
     // P257 R1-3: the sixth (it imports ../components/side-sheet).
     "app/app/commerce/recurring/recurring-panel.tsx",
   ];
-  for (const path of CALLERS) {
-    it(`${path} imports this SideSheet and passes no closeDisabled`, () => {
-      const text = readFileSync(join(SRC, path), "utf8");
-      expect(text).toMatch(/components\/side-sheet"|from "\.\/side-sheet"/);
-      expect(text, `${path} now passes closeDisabled`).not.toMatch(/closeDisabled/);
+  /**
+   * P257 R2-1: the import is resolved, not matched loosely: `./side-sheet` beside components/ui is
+   * components/ui/side-sheet.tsx, a different component. Relative specifiers resolve from the importing file, `@/`
+   * from src; only one that names the commerce side-sheet module counts.
+   */
+  function importsCommerceSheet(rel: string): boolean {
+    const text = readFileSync(join(SRC, rel), "utf8");
+    for (const m of text.matchAll(/from\s+["']([^"']*side-sheet)["']/g)) {
+      const spec = m[1];
+      const resolved = spec.startsWith("@/") ? join(SRC, spec.slice(2)) : spec.startsWith(".") ? join(dirname(join(SRC, rel)), spec) : null;
+      if (resolved === SHEET) return true;
+    }
+    return false;
+  }
+  /** Every non-test source file under src, relative to src. */
+  function sources(dir = SRC): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+      const full = join(dir, e.name);
+      if (e.isDirectory()) return e.name === "__tests__" || e.name === "node_modules" ? [] : sources(full);
+      return /\.(ts|tsx)$/.test(e.name) && !/\.(test|spec)\.tsx?$/.test(e.name) ? [relative(SRC, full)] : [];
     });
   }
+  for (const path of CALLERS) {
+    it(`${path} imports this SideSheet (resolved) and passes no closeDisabled`, () => {
+      expect(importsCommerceSheet(path), `${path} does not import the commerce side-sheet`).toBe(true);
+      expect(readFileSync(join(SRC, path), "utf8"), `${path} now passes closeDisabled`).not.toMatch(/closeDisabled/);
+    });
+  }
+  it("the list is complete: every file that imports the commerce SideSheet is listed (or is the expense sheet)", () => {
+    const importers = sources().filter(importsCommerceSheet).sort();
+    expect(importers, "a caller of the commerce SideSheet is missing from CALLERS, or one listed is not a caller").toEqual([...CALLERS, EXPENSE_SHEET].sort());
+  });
   it("the expense sheet passes it", () => {
-    const text = readFileSync(join(SRC, "app/app/expenses/components/expense-form-sidesheet.tsx"), "utf8");
+    const text = readFileSync(join(SRC, EXPENSE_SHEET), "utf8");
     expect(text).toMatch(/closeDisabled=\{submitting\}/);
   });
 });
