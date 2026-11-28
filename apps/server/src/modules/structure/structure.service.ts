@@ -195,8 +195,12 @@ export class StructureService {
    *                      configuration and not something a model should be
    *                      reasoning about or repeating.
    */
-  async listPeople(businessId: string, opts: { search?: string; limit?: number } = {}) {
+  async listPeople(
+    businessId: string,
+    opts: { search?: string; limit?: number; includeStructure?: boolean } = {},
+  ) {
     const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
+    const includeStructure = opts.includeStructure !== false;
 
     const [memberships, staff] = await Promise.all([
       this.prisma.client.membership.findMany({
@@ -208,24 +212,28 @@ export class StructureService {
           dailyCapacityHours: true,
           skills: { select: { name: true } },
           user: { select: { id: true, name: true, firstName: true, lastName: true, email: true } },
-          orgAssignments: {
-            // businessId as well as the membership scope. Assignments created
-            // before assertAssignmentRefs existed could name a membership in
-            // another business, so nesting under a scoped membership is not on
-            // its own proof that the assignment belongs here.
-            where: { businessId, endedAt: null },
-            orderBy: { isPrimary: 'desc' },
-            take: 1,
-            select: {
-              orgUnit: { select: { name: true, type: true } },
-              jobRole: { select: { name: true, level: true } },
-              reportsTo: {
-                select: {
-                  membership: { select: { user: { select: { name: true, email: true } } } },
+          ...(includeStructure
+            ? {
+                orgAssignments: {
+                  // businessId as well as the membership scope. Assignments created
+                  // before assertAssignmentRefs existed could name a membership in
+                  // another business, so nesting under a scoped membership is not on
+                  // its own proof that the assignment belongs here.
+                  where: { businessId, endedAt: null },
+                  orderBy: { isPrimary: 'desc' as const },
+                  take: 1,
+                  select: {
+                    orgUnit: { select: { name: true, type: true } },
+                    jobRole: { select: { name: true, level: true } },
+                    reportsTo: {
+                      select: {
+                        membership: { select: { user: { select: { name: true, email: true } } } },
+                      },
+                    },
+                  },
                 },
-              },
-            },
-          },
+              }
+            : {}),
         },
         take: 200,
       }),
@@ -242,8 +250,8 @@ export class StructureService {
     ]);
 
     const people = [
-      ...memberships.map((m) => {
-        const assignment = m.orgAssignments[0];
+      ...memberships.map((m: any) => {
+        const assignment = includeStructure ? m.orgAssignments?.[0] : undefined;
         const reportsToUser = assignment?.reportsTo?.membership?.user;
         return {
           id: m.user.id,
@@ -256,13 +264,13 @@ export class StructureService {
           email: m.user.email ?? null,
           accessLevel: m.role,
           approvalTier: m.maxApprovalTier,
-          jobRole: assignment?.jobRole?.name ?? null,
-          jobRoleLevel: assignment?.jobRole?.level ?? null,
-          orgUnit: assignment?.orgUnit?.name ?? null,
-          orgUnitType: assignment?.orgUnit?.type ?? null,
-          reportsTo: reportsToUser?.name ?? reportsToUser?.email ?? null,
+          jobRole: includeStructure ? (assignment?.jobRole?.name ?? null) : null,
+          jobRoleLevel: includeStructure ? (assignment?.jobRole?.level ?? null) : null,
+          orgUnit: includeStructure ? (assignment?.orgUnit?.name ?? null) : null,
+          orgUnitType: includeStructure ? (assignment?.orgUnit?.type ?? null) : null,
+          reportsTo: includeStructure ? (reportsToUser?.name ?? reportsToUser?.email ?? null) : null,
           weeklyCapacityHours: m.dailyCapacityHours != null ? m.dailyCapacityHours * 5 : null,
-          skills: m.skills.map((s) => s.name),
+          skills: m.skills.map((s: any) => s.name),
         };
       }),
       ...staff.map((s) => ({
@@ -285,7 +293,10 @@ export class StructureService {
     const needle = opts.search?.trim().toLowerCase();
     const filtered = needle
       ? people.filter((p) =>
-          [p.name, p.email, p.jobRole, p.orgUnit, ...p.skills]
+          (includeStructure
+            ? [p.name, p.email, p.jobRole, p.orgUnit, ...p.skills]
+            : [p.name, p.email, ...p.skills]
+          )
             .filter(Boolean)
             .some((field) => String(field).toLowerCase().includes(needle)),
         )

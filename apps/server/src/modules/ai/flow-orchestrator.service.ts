@@ -56,12 +56,11 @@ import { GenomeFactService } from '../business-genome/key-genome/genome-fact.ser
 // for flow-tool-effect-metadata REVIEWED_NON_READ_FAMILY_READ_TOOLS citations.
 import { genomeReaderReadsRevenue, isMoneyLabel, proposalTextStatesMoney } from '../business-genome/key-genome/genome-finance-scope';
 import { createReminderTask, createSentOverdueInvoiceReminderDraft, listSentOverdueInvoices, recommendStaleFollowUps, summarizePaidRevenue } from './legacy-promoted-tools.helper';
-import { isToolAllowedInV1, v1ToolRefusalReason, V1_TOOL_UNAVAILABLE_MESSAGE } from './v1-tool-allowlist';
-import {
-  blueprintForReader,
-  genomeFactsForReader,
-  genomeIntegrityForReader,
-} from '../key-cortex/genome-read-projections';
+import { isFlowToolReadOnly, isToolAllowedForBusinessInV1, v1HiddenModuleForTool, v1ToolArgumentRefusalReason, v1ToolDomainRefusalReason, v1ToolRefusalReason, V1_TOOL_UNAVAILABLE_MESSAGE, type V1BusinessToolContext } from './v1-tool-allowlist';
+import { LegacyModulesService } from '../identity/legacy-modules.service';
+import { readBusinessSettings } from '../../core/prisma/business-meta';
+import { blueprintForReader, genomeFactsForReader, genomeIntegrityForReader } from '../key-cortex/genome-read-projections';
+// V1-67 (KEY-TOOL-DOMAIN-HIDE): compact imports preserve executeToolAction case line numbers.
 import { BusinessGraphService } from './business-graph.service';
 import { PlannerService } from './planner.service';
 import { getOpenAiToolDefinitions, getToolByName, isReadOnlyTool, RiskLevel, ToolFamily, wrapToolResult, FlowTool, CORTEX_TOOL_BRIDGE, isCortexBridgedTool, PRO_AUTO_MONITOR_EXEMPT_READ_TOOLS } from './flow-tool-registry';
@@ -2232,7 +2231,8 @@ export class FlowOrchestratorService {
     } else {
       candidates = all;
     }
-    candidates = candidates.filter((t) => isToolAllowedInV1(t.function.name));
+    const v1BizCtx = await this.resolveBusinessToolContext(businessId);
+    candidates = candidates.filter((t) => isToolAllowedForBusinessInV1(t.function.name, v1BizCtx));
     // PR195-KEY-GATES (review SEC-P195BW-3, SEC-P195BW-5, CRR-P195BD-2): in a member's own chat a tool is offered
     // only when the member holds every module scope its REST routes require, read or write (keyMemberMenuScopes,
     // derived from CANONICAL_MODULE_TOOLS, the governed part of a GOVERNED_UNGRANTED tool and the authority map's
@@ -3009,7 +3009,7 @@ ${triage.standingContext}`;
       try {
         if (pendingConfirmation.toolName && pendingConfirmation.toolArgs) {
           // Governed again now, on the bound tool and the crew it was proposed under.
-          const confirmDecision = this.v1BlockedDecision(pendingConfirmation.toolName) ?? await this.governance.evaluate(businessId, pendingConfirmation.toolName, undefined, claim.crew, envelope);
+          const confirmDecision = (await this.v1BlockedDecision(businessId, pendingConfirmation.toolName, pendingConfirmation.toolArgs)) ?? await this.governance.evaluate(businessId, pendingConfirmation.toolName, undefined, claim.crew, envelope);
           if (!confirmDecision.allowed) {
             await claim.settle('refused', confirmDecision.reason);
             return {
@@ -3175,7 +3175,7 @@ ${triage.standingContext}`;
 
       const governanceChecks = await Promise.all(
         toolCalls.map(async (tc) => {
-          const decision = this.v1BlockedDecision(tc.name) ?? await this.governance.evaluate(businessId, tc.name, undefined, crew, envelope);
+          const decision = (await this.v1BlockedDecision(businessId, tc.name, tc.arguments)) ?? await this.governance.evaluate(businessId, tc.name, undefined, crew, envelope);
           // W9-KEY-DISPATCH-INCLUDES (CR-W7CTC-2; D-73, D-88): a staff position's call_create_task
           // runs for its holder (chatToolAction); every other call keeps this context.
           // PR195-KEY-GATES (review SEC-P195BW-1): a staff position's turn (an envelope, no principal) is marked so,
@@ -3731,7 +3731,7 @@ ${triage.standingContext}`;
 
       const governanceChecks = await Promise.all(
         toolCalls.map(async (tc) => {
-          const decision = this.v1BlockedDecision(tc.name) ?? await this.governance.evaluate(businessId, tc.name, undefined, crew, envelope);
+          const decision = (await this.v1BlockedDecision(businessId, tc.name, tc.arguments)) ?? await this.governance.evaluate(businessId, tc.name, undefined, crew, envelope);
           return this.governToolCall(businessId, tc, decision, {
             surface: 'CHAT_STREAM',
             principalUserId: userId ?? null,
@@ -4428,7 +4428,7 @@ ${triage.standingContext}`;
       // KEY-cortex turn's bridged call; review SEC-W8KRG-1, SEC-W8KRG-2), judged with these arguments
       // (review CR-W8KRG-1).
       const refusal = await this.memberScopeRefusal(businessId, toolName, action, args);
-      if (refusal) throw v1ToolRefusalReason(toolName) ? new ForbiddenException(refusal) : new Error(refusal);
+      if (refusal) throw refusal === V1_TOOL_UNAVAILABLE_MESSAGE ? new ForbiddenException(refusal) : new Error(refusal);
       this.validateToolInput(toolName, args);
       const rawResult = await this.executeToolAction(businessId, toolName, args, action);
       const envelope = wrapToolResult(toolName, rawResult);
@@ -4665,7 +4665,7 @@ ${triage.standingContext}`;
   ): Promise<unknown> {
     // PR195-KEY-GATES (SEC-P195BW-1) + KEY-TOOL-ALLOWLIST (V1-63, D-318 Option 1): refuse v1-removed tools
     // before memberlessKeyTurn/executeToolAction; otherwise hold memberless turns to the customer-safe allowlist.
-    const v1Refusal = v1ToolRefusalReason(toolName);
+    const v1Refusal = await this.v1DomainToolRefusal(businessId, toolName, args);
     if (v1Refusal) throw new ForbiddenException(v1Refusal);
     if (memberlessKeyTurn(action)) {
       const refusal = memberlessKeyToolRefusal(toolName, args, action?.surface ?? 'UNDECLARED');
@@ -4703,7 +4703,7 @@ ${triage.standingContext}`;
     action?: KeyDispatchAction,
     args?: unknown,
   ): Promise<string | null> {
-    if (!isToolAllowedInV1(toolName)) return V1_TOOL_UNAVAILABLE_MESSAGE;
+    const v1Refusal = await this.v1DomainToolRefusal(businessId, toolName, args); if (v1Refusal) return v1Refusal;
     if (memberlessKeyTurn(action)) return memberlessKeyToolRefusal(toolName, args, action?.surface ?? 'UNDECLARED');
     const { memberToolScopeRefusal, noMemberMoneyWriteRefusal } = await import('./plan-step-authority');
     const memberId = memberRevenueGateMember(action);
@@ -4987,7 +4987,7 @@ ${triage.standingContext}`;
     // that passes nothing arrives there undeclared and is refused.
     action?: KeyDispatchAction,
   ): Promise<any> {
-    const v1Refusal = v1ToolRefusalReason(toolName);
+    const v1Refusal = v1ToolRefusalReason(toolName) ?? v1ToolArgumentRefusalReason(toolName, args);
     if (v1Refusal) throw new ForbiddenException(v1Refusal);
     if (isMcpToolName(toolName)) {
       return this.getMcp().callTool(businessId, toolName, args);
@@ -8796,9 +8796,11 @@ ${triage.standingContext}`;
       // rest of the team: who they are, what they are carrying, and the ability
       // to hand work to a human.
       case 'people_list': {
+        const v1BizCtx = await this.resolveBusinessToolContext(businessId);
         return this.getStructure().listPeople(businessId, {
           search: args.search,
           limit: args.limit,
+          includeStructure: v1BizCtx.legacyModules.has('structure'),
         });
       }
 
@@ -9758,8 +9760,77 @@ ${triage.standingContext}`;
     return this.executeTool(businessId, toolName, args, undefined, planContext, action);
   }
 
-  private v1BlockedDecision(toolName: string) {
-    const v1Refusal = v1ToolRefusalReason(toolName);
+  private getLegacyModules(): LegacyModulesService | null {
+    try {
+      return this.moduleRef?.get(LegacyModulesService, { strict: false }) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Resolves the business's per-business v1 hidden-module visibility context
+   * from `LegacyModulesService` (NAV-B-LEGACY-SERVER) and `Business.metaData.advancedCrm`
+   * (D-150). Fails closed (empty legacy set, `advancedCrmEnabled: false`) when a
+   * minimal unit-test stub provides neither `LegacyModulesService` nor Prisma `$transaction`.
+   */
+  private async resolveBusinessToolContext(businessId: string): Promise<V1BusinessToolContext> {
+    const legacySvc =
+      this.getLegacyModules() ??
+      (typeof (this.prisma?.client as any)?.$transaction === 'function'
+        ? new LegacyModulesService(this.prisma)
+        : null);
+
+    const legacyPromise: Promise<readonly string[]> = legacySvc
+      ? legacySvc.getLegacyModules(businessId)
+      : Promise.resolve([]);
+
+    const bizFindUnique = (this.prisma?.client as any)?.business?.findUnique;
+    const bizPromise: Promise<{ metaData?: unknown } | null> =
+      typeof bizFindUnique === 'function'
+        ? bizFindUnique.call(this.prisma.client.business, {
+            where: { id: businessId },
+            select: { metaData: true },
+          })
+        : Promise.resolve(null);
+
+    const [legacyKeys, bizRow] = await Promise.all([legacyPromise, bizPromise]);
+    const advancedCrmEnabled = readBusinessSettings(bizRow?.metaData).advancedCrm === true;
+    return {
+      legacyModules: new Set(legacyKeys),
+      advancedCrmEnabled,
+    };
+  }
+
+  /**
+   * Returns `'not available in this version'` when `toolName` (with optional `args`)
+   * is refused for `businessId` by `KEY-TOOL-ALLOWLIST` (V1-63) or
+   * `KEY-TOOL-DOMAIN-HIDE` (V1-67), or `null` when allowed.
+   */
+  private async v1DomainToolRefusal(
+    businessId: string,
+    toolName: string,
+    args?: unknown,
+  ): Promise<string | null> {
+    const unconditional = v1ToolRefusalReason(toolName);
+    if (unconditional) return unconditional;
+
+    const argRefusal = v1ToolArgumentRefusalReason(toolName, args);
+    if (argRefusal) return argRefusal;
+
+    const hiddenMod = v1HiddenModuleForTool(toolName);
+    if (!hiddenMod) return null;
+
+    if (hiddenMod.treatment !== 'hide-advanced' && !isFlowToolReadOnly(toolName)) {
+      return V1_TOOL_UNAVAILABLE_MESSAGE;
+    }
+
+    const ctx = await this.resolveBusinessToolContext(businessId);
+    return v1ToolDomainRefusalReason(toolName, ctx, args);
+  }
+
+  private async v1BlockedDecision(businessId: string, toolName: string, args?: unknown) {
+    const v1Refusal = await this.v1DomainToolRefusal(businessId, toolName, args);
     if (!v1Refusal) return null;
     return {
       allowed: false,
@@ -9793,12 +9864,12 @@ ${triage.standingContext}`;
     // Refused before anything runs, and recorded. (Imported at call time: plan-step-authority imports
     // graph-actions.controller, which imports this file.)
     const memberId = options.memberId || undefined;
-    const v1Refusal = v1ToolRefusalReason(toolName);
+    const v1Refusal = await this.v1DomainToolRefusal(businessId, toolName, args);
     if (v1Refusal) {
       await this.executionLog.logToolExecution(businessId, toolName, args, `Refused: ${v1Refusal}`, false, 0, {
         riskTier: this.governance.getToolTier(toolName),
         mode: 'pro_auto',
-        rationale: 'Refused for Pro Auto monitoring: tool is disabled in v1 (V1-63)',
+        rationale: 'Refused for Pro Auto monitoring: tool is disabled in v1 (V1-63 / V1-67)',
       }).then((logId) => this.attributeExecutionLog(businessId, logId, memberId)).catch((e: unknown) => {
         this.logger.error(`Failed to log refused auto-execution for ${toolName}: ${e instanceof Error ? e.message : String(e)}`);
       });

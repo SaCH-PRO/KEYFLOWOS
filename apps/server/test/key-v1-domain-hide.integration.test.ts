@@ -427,7 +427,7 @@ describe('KEY-TOOL-DOMAIN-HIDE (V1-67, D-329) — real Postgres + LegacyModulesS
     expect(offered).not.toContain('projects_complete_task');
     expect(offered).not.toContain('projects_update');
 
-    // Read tool executes
+    // Read tool executes against real Postgres
     const readRes = await orchestrator.executeToolDirect(
       ID.bizProj,
       'projects_list',
@@ -437,7 +437,7 @@ describe('KEY-TOOL-DOMAIN-HIDE (V1-67, D-329) — real Postgres + LegacyModulesS
       { surface: 'CHAT', principalUserId: ID.owner },
     );
     expect(readRes.success).toBe(true);
-    expect(projectsMock.listProjects).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(readRes.result)).toContain(`${P}Legacy Project`);
 
     // Write tool refused plainly
     const writeRes = await orchestrator.executeToolDirect(
@@ -496,11 +496,14 @@ describe('KEY-TOOL-DOMAIN-HIDE (V1-67, D-329) — real Postgres + LegacyModulesS
     expect(await legacyModules.getLegacyModules(ID.bizLegacyDeals)).toEqual(['advanced_crm']);
     expect(await legacyModules.getLegacyModules(ID.bizAdvCrm)).toEqual([]);
 
-    const offeredLegacy = await offeredToolNames(ID.bizLegacyDeals, 'deals pipeline stages forecast create update');
+    const offeredLegacy = await offeredToolNames(ID.bizLegacyDeals, 'deals pipeline stages forecast velocity create update');
     expect(offeredLegacy).toContain('deals_list');
     expect(offeredLegacy).toContain('deals_get');
-    expect(offeredLegacy).toContain('deals_list_stages');
+    expect(offeredLegacy).toContain('deals_forecast');
+    expect(offeredLegacy).toContain('deals_pipeline_velocity');
     expect(offeredLegacy).toContain('crm_list_deals');
+    // INTERNAL_WRITE / write tools stay withheld for legacy-only deals
+    expect(offeredLegacy).not.toContain('deals_list_stages');
     expect(offeredLegacy).not.toContain('deals_create');
     expect(offeredLegacy).not.toContain('deals_update');
     expect(offeredLegacy).not.toContain('deals_delete');
@@ -520,6 +523,7 @@ describe('KEY-TOOL-DOMAIN-HIDE (V1-67, D-329) — real Postgres + LegacyModulesS
     // Opted-in Advanced CRM business (advancedCrm: true) gets BOTH read and write deals tools
     const offeredOptIn = await offeredToolNames(ID.bizAdvCrm, 'deals pipeline stages forecast create update');
     expect(offeredOptIn).toContain('deals_list');
+    expect(offeredOptIn).toContain('deals_list_stages');
     expect(offeredOptIn).toContain('deals_create');
     expect(offeredOptIn).toContain('deals_update');
 

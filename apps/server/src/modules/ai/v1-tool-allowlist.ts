@@ -16,11 +16,21 @@
  *       3. Owner-only dotted cortex stub tools (`cortex.send_email`,
  *          `cortex.send_message`, `cortex.generate_report` and bare aliases; D-119)
  *   - Hidden-module domain families are classified here via `v1ToolModuleFamily`
- *     but are NOT yet hidden here: `KEY-TOOL-DOMAIN-HIDE` applies per-business
- *     legacy-list gating on top of this classifier so businesses with legacy
- *     records keep their read tools.
+ *     and gated per business via `v1ToolDomainRefusalReason` /
+ *     `isToolAllowedForBusinessInV1` / `getAllowedV1FlowToolsForBusiness`
+ *     (`KEY-TOOL-DOMAIN-HIDE`, V1-67, D-152 / D-150 / D-156 / D-329):
+ *       - A hidden module not in the business's legacy list (`NAV-B-LEGACY-SERVER`)
+ *         has all its tools withheld from prompts and refused at dispatch.
+ *       - A hidden module in the business's legacy list keeps its read tools
+ *         (`effectClass === 'READ'`), while writes stay withheld.
+ *       - `advanced_crm` (`treatment: 'hide-advanced'`, D-150) keeps read+write
+ *         when `Business.metaData.advancedCrm === true`.
+ *       - `SEC-V61-3` argument guards gate `people_assign_task` (`ProjectTask`)
+ *         and `reconcile_connect_statement_source` / `reconcile_sweep_statements`
+ *         (Google Drive deferred).
  */
-import { V1_HIDDEN_MODULES, type V1HiddenModuleKey } from '@keyflow/shared';
+import { V1_HIDDEN_MODULES, type V1HiddenModule, type V1HiddenModuleKey } from '@keyflow/shared';
+import { FLOW_TOOLS, type FlowTool, type ToolEffectClass } from './flow-tool-registry';
 
 export const V1_TOOL_UNAVAILABLE_MESSAGE = 'not available in this version';
 
@@ -181,6 +191,39 @@ const HIDDEN_TOOL_TO_MODULE: ReadonlyMap<string, V1HiddenModuleKey> = (() => {
   return map;
 })();
 
+const HIDDEN_TOOL_TO_MODULE_ENTRY: ReadonlyMap<string, V1HiddenModule> = (() => {
+  const map = new Map<string, V1HiddenModule>();
+  for (const mod of V1_HIDDEN_MODULES) {
+    for (const tool of mod.keyTools) {
+      map.set(tool, mod);
+    }
+  }
+  return map;
+})();
+
+const FLOW_TOOL_EFFECT_CLASS: ReadonlyMap<string, ToolEffectClass> = (() => {
+  const map = new Map<string, ToolEffectClass>();
+  for (const tool of FLOW_TOOLS) {
+    map.set(tool.name.trim().toLowerCase(), tool.effectClass);
+  }
+  return map;
+})();
+
+/**
+ * Per-business context governing hidden-module tool visibility in v1
+ * (`KEY-TOOL-DOMAIN-HIDE`, V1-67).
+ */
+export interface V1BusinessToolContext {
+  /** Legacy hidden-module keys returned by `LegacyModulesService.getLegacyModules(businessId)`. */
+  readonly legacyModules: ReadonlySet<string>;
+  /**
+   * Whether the business explicitly enabled Advanced CRM (`Business.metaData.advancedCrm === true`, D-150).
+   * When true, `advanced_crm` (`treatment: 'hide-advanced'`) keeps both read and write tools.
+   * When false (default), `advanced_crm` follows the legacy read-only / hidden rule.
+   */
+  readonly advancedCrmEnabled?: boolean;
+}
+
 /**
  * Classifies a FLOW tool into its canonical module family from
  * `packages/shared/src/v1-modules.ts` (`V1_HIDDEN_MODULES` key), `'v1_core'`
@@ -193,6 +236,20 @@ export function v1ToolModuleFamily(toolName: string): string {
   if (hidden) return hidden;
   if (V1_KEY_TOOLS.has(normalized)) return 'v1_core';
   return '';
+}
+
+/** Returns the `V1HiddenModule` entry owning `toolName`, or `null` if it is a v1 core / non-hidden tool. */
+export function v1HiddenModuleForTool(toolName: string): V1HiddenModule | null {
+  const normalized = typeof toolName === 'string' ? toolName.trim().toLowerCase() : '';
+  if (!normalized) return null;
+  return HIDDEN_TOOL_TO_MODULE_ENTRY.get(normalized) ?? null;
+}
+
+/** Whether `toolName` is a declared `READ`-only FLOW tool (`effectClass === 'READ'`). */
+export function isFlowToolReadOnly(toolName: string): boolean {
+  const normalized = typeof toolName === 'string' ? toolName.trim().toLowerCase() : '';
+  if (!normalized) return false;
+  return FLOW_TOOL_EFFECT_CLASS.get(normalized) === 'READ';
 }
 
 /**
@@ -214,6 +271,108 @@ export function v1ToolRefusalReason(toolName: string): string | null {
 /** Whether `toolName` is allowed on the v1 allowlist (not unconditionally disabled). */
 export function isToolAllowedInV1(toolName: string): boolean {
   return v1ToolRefusalReason(toolName) === null;
+}
+
+/**
+ * Argument-level v1 guards for v1 core tools that can target deferred hidden
+ * modules (USAGE-COUNT-SCRIPT review `SEC-V61-3`):
+ *   - `people_assign_task` assigning a `ProjectTask` (`projects` write -> refused)
+ *   - `reconcile_connect_statement_source` connecting a Google Drive folder
+ *     (non-empty `driveFolderId` -> refused; empty `''` disconnect stays allowed)
+ *   - `reconcile_sweep_statements` sweeping `source: 'drive'` (Google Drive deferred -> refused)
+ */
+export function v1ToolArgumentRefusalReason(toolName: string, args?: unknown): string | null {
+  if (!args || typeof args !== 'object') return null;
+  const normalized = typeof toolName === 'string' ? toolName.trim().toLowerCase() : '';
+  const obj = args as Record<string, unknown>;
+
+  if (normalized === 'people_assign_task') {
+    const taskType = ownProp(obj, 'taskType');
+    if (typeof taskType === 'string' && taskType.trim().toLowerCase() === 'projecttask') {
+      return V1_TOOL_UNAVAILABLE_MESSAGE;
+    }
+    return null;
+  }
+
+  if (normalized === 'reconcile_connect_statement_source') {
+    const driveFolderId = ownProp(obj, 'driveFolderId');
+    if (driveFolderId !== undefined && driveFolderId !== null && String(driveFolderId).trim() !== '') {
+      return V1_TOOL_UNAVAILABLE_MESSAGE;
+    }
+    return null;
+  }
+
+  if (normalized === 'reconcile_sweep_statements') {
+    const source = ownProp(obj, 'source');
+    if (typeof source === 'string' && source.trim().toLowerCase() === 'drive') {
+      return V1_TOOL_UNAVAILABLE_MESSAGE;
+    }
+    return null;
+  }
+
+  return null;
+}
+
+/**
+ * Per-business v1 refusal reason (`KEY-TOOL-DOMAIN-HIDE`, V1-67, D-152 / D-150 / D-156 / D-329).
+ *
+ *   1. Unconditionally disabled tools (`v1ToolRefusalReason`) -> refused.
+ *   2. `SEC-V61-3` argument-level hidden-module targets (`v1ToolArgumentRefusalReason`) -> refused.
+ *   3. Hidden-module tools (`V1_HIDDEN_MODULES`):
+ *      - `advanced_crm` (`hide-advanced`, D-150) when `ctx.advancedCrmEnabled === true` -> allowed (read + write).
+ *      - Module not in `ctx.legacyModules` -> refused.
+ *      - Module in `ctx.legacyModules` -> allowed ONLY if `isFlowToolReadOnly(toolName)` (`effectClass === 'READ'`);
+ *        writes stay refused.
+ *   4. All other tools (`V1_KEY_TOOLS` / non-hidden) -> allowed (`null`).
+ */
+export function v1ToolDomainRefusalReason(
+  toolName: string,
+  ctx: V1BusinessToolContext,
+  args?: unknown,
+): string | null {
+  const unconditional = v1ToolRefusalReason(toolName);
+  if (unconditional) return unconditional;
+
+  const argRefusal = v1ToolArgumentRefusalReason(toolName, args);
+  if (argRefusal) return argRefusal;
+
+  const hiddenMod = v1HiddenModuleForTool(toolName);
+  if (!hiddenMod) return null;
+
+  if (
+    hiddenMod.treatment === 'hide-advanced' &&
+    hiddenMod.key === 'advanced_crm' &&
+    ctx.advancedCrmEnabled === true
+  ) {
+    return null;
+  }
+
+  if (!ctx.legacyModules.has(hiddenMod.key)) {
+    return V1_TOOL_UNAVAILABLE_MESSAGE;
+  }
+
+  if (isFlowToolReadOnly(toolName)) {
+    return null;
+  }
+
+  return V1_TOOL_UNAVAILABLE_MESSAGE;
+}
+
+/** Whether `toolName` is allowed for this business in v1 (`KEY-TOOL-DOMAIN-HIDE`). */
+export function isToolAllowedForBusinessInV1(
+  toolName: string,
+  ctx: V1BusinessToolContext,
+  args?: unknown,
+): boolean {
+  return v1ToolDomainRefusalReason(toolName, ctx, args) === null;
+}
+
+/**
+ * Canonical per-business v1 `FLOW_TOOLS` list shared by chat tool selection
+ * (`FlowOrchestratorService.selectToolsForRequest`) and `IntentParserService`.
+ */
+export function getAllowedV1FlowToolsForBusiness(ctx: V1BusinessToolContext): readonly FlowTool[] {
+  return FLOW_TOOLS.filter((tool) => isToolAllowedForBusinessInV1(tool.name, ctx));
 }
 
 const V1_WRAPPER_TOOLS: ReadonlySet<string> = new Set([
