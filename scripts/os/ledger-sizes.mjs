@@ -19,9 +19,12 @@ import {
   recordKeyCount,
   arrayElementCount,
   objectKeyCount,
+  recordCountFieldSum,
+  parseWorkflowMaxWarnings,
 } from './lib.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const STRICT_NUMBER_RE = /^-?\d+(?:\.\d+)?$/;
 
 // direction: 'shrink' = count may only go down; 'grow' = floor may only go up.
 export const LEDGERS = [
@@ -46,6 +49,7 @@ export const LEDGERS = [
 
   // RR-GATE-LEDGER-CENSUS (D-261, D-262, D-22): every remaining shrink-only
   // ledger and ratchet across apps/, packages/, scripts/, and .github/.
+  { name: 'trpc.broken_ctx_business', file: 'apps/server/src/trpc.module.spec.ts', constant: 'BROKEN_BY_MISSING_CTX_BUSINESS', kind: 'strings', direction: 'shrink' },
   { name: 'cast.known_broken', file: 'apps/server/src/core/config/cast-call-integrity.spec.ts', constant: 'KNOWN_BROKEN', kind: 'strings', direction: 'shrink' },
   { name: 'lint.server_max_warnings', file: '.github/workflows/ci-cd.yml', workspace: 'server', kind: 'workflow-max-warnings', direction: 'shrink' },
   { name: 'lint.web_max_warnings', file: '.github/workflows/ci-cd.yml', workspace: 'web', kind: 'workflow-max-warnings', direction: 'shrink' },
@@ -65,12 +69,14 @@ export const LEDGERS = [
   { name: 'ai.non_strict_openai_tools', file: 'apps/server/src/modules/ai/flow-tool-registry.ts', constant: 'NON_STRICT_OPENAI_TOOLS', kind: 'strings', direction: 'shrink' },
   { name: 'ai.pro_auto_monitor_exempt_read_tools', file: 'apps/server/src/modules/ai/flow-tool-registry.ts', constant: 'PRO_AUTO_MONITOR_EXEMPT_READ_TOOLS', kind: 'strings', direction: 'shrink' },
   { name: 'commerce.balance_known_outside', file: 'apps/server/src/modules/commerce/balance-arithmetic.spec.ts', constant: 'KNOWN_OUTSIDE_WRITE_SET', kind: 'object-keys', direction: 'shrink' },
+  { name: 'commerce.balance_known_outside_sites', file: 'apps/server/src/modules/commerce/balance-arithmetic.spec.ts', constant: 'KNOWN_OUTSIDE_WRITE_SET', kind: 'record-count-sum', direction: 'shrink' },
   { name: 'commerce.balance_unreachable_web', file: 'apps/server/src/modules/commerce/balance-arithmetic.spec.ts', constant: 'UNREACHABLE_WRITE_SET_WEB', kind: 'object-keys', direction: 'shrink' },
   { name: 'commerce.invoice_status_bypass_allowlist', file: 'apps/server/src/modules/commerce/invoice-status-writers.spec.ts', constant: 'BYPASS_ALLOWLIST', kind: 'object-keys', direction: 'shrink' },
   { name: 'commerce.invoice_status_allowlist_ceiling', file: 'apps/server/src/modules/commerce/invoice-status-writers.spec.ts', constant: 'ALLOWLIST_CEILING', kind: 'number', direction: 'shrink' },
   { name: 'web.link_targets_acknowledged', file: 'apps/web/src/lib/__tests__/link-targets.spec.ts', constant: 'ACKNOWLEDGED', kind: 'object-keys', direction: 'shrink' },
   { name: 'web.invoice_link_outside', file: 'apps/web/src/lib/__tests__/link-targets.spec.ts', constant: 'INVOICE_LINK_OUTSIDE_WRITE_SET', kind: 'object-keys', direction: 'shrink' },
   { name: 'web.unencoded_invoice_detail_outside', file: 'apps/web/src/lib/__tests__/link-targets.spec.ts', constant: 'UNENCODED_INVOICE_DETAIL_OUTSIDE_WRITE_SET', kind: 'object-keys', direction: 'shrink' },
+  { name: 'web.unencoded_invoice_detail_outside_sites', file: 'apps/web/src/lib/__tests__/link-targets.spec.ts', constant: 'UNENCODED_INVOICE_DETAIL_OUTSIDE_WRITE_SET', kind: 'record-count-sum', direction: 'shrink' },
   { name: 'web.nav_page_title_outside', file: 'apps/web/src/lib/__tests__/nav-labels-agree.spec.ts', constant: 'PAGE_TITLE_OUTSIDE_WRITE_SET', kind: 'object-keys', direction: 'shrink' },
   { name: 'web.nav_cockpit_label_outside', file: 'apps/web/src/lib/__tests__/nav-labels-agree.spec.ts', constant: 'COCKPIT_LABEL_OUTSIDE_WRITE_SET', kind: 'object-keys', direction: 'shrink' },
   { name: 'web.redirect_shadowed_acknowledged', file: 'apps/web/src/lib/__tests__/redirect-shadowing.spec.ts', constant: 'ACKNOWLEDGED_SHADOWED', kind: 'strings', direction: 'shrink' },
@@ -93,28 +99,6 @@ function countMarkdownRows(src, header) {
     count++;
   }
   return count;
-}
-
-// Parse `--max-warnings <N>` from an active (non-comment) workflow `run:` line
-// for the given pnpm workspace (e.g. `pnpm --filter server lint --max-warnings 3343`).
-// Fails closed if absent or matched more than once.
-function parseWorkflowMaxWarnings(src, workspace) {
-  const escaped = workspace.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const re = new RegExp(
-    `^\\s*(?:-\\s*)?run:\\s+.*\\bpnpm\\s+--filter\\s+${escaped}\\s+lint\\s+--max-warnings(?:=|\\s+)(\\d+)\\b`,
-  );
-  const matches = [];
-  for (const line of src.split(/\r?\n/)) {
-    if (/^\s*#/.test(line)) continue;
-    const m = re.exec(line);
-    if (m) matches.push(Number(m[1]));
-  }
-  if (matches.length !== 1) {
-    throw new Error(
-      `expected exactly 1 lint --max-warnings run line for workspace "${workspace}", found ${matches.length}`,
-    );
-  }
-  return matches[0];
 }
 
 function isAbsenceError(ledger, err) {
@@ -160,8 +144,16 @@ export function measure(readFile = (rel) => readFileSync(resolve(ROOT, rel), 'ut
         else if (l.kind === 'record-keys') value = recordKeyCount(init);
         else if (l.kind === 'array-elements') value = arrayElementCount(init);
         else if (l.kind === 'object-keys') value = objectKeyCount(init);
-        else if (l.kind === 'number') value = Number(init.trim());
-        else throw new Error(`unknown ledger kind: ${l.kind}`);
+        else if (l.kind === 'record-count-sum') value = recordCountFieldSum(init);
+        else if (l.kind === 'number') {
+          const trimmed = init.trim();
+          if (!STRICT_NUMBER_RE.test(trimmed)) {
+            throw new Error(`expected numeric literal for ${l.name}, got ${JSON.stringify(trimmed)}`);
+          }
+          value = Number(trimmed);
+        } else {
+          throw new Error(`unknown ledger kind: ${l.kind}`);
+        }
       }
       if (!Number.isFinite(value)) throw new Error(`non-numeric result for ${l.name}`);
       const constantLabel =
