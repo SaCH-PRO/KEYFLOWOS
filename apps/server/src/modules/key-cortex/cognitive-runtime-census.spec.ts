@@ -1,42 +1,14 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as ts from 'typescript';
-
-export type CognitiveRuntimeId =
-  | 'flow-orchestrator'
-  | 'cortex-consciousness'
-  | 'cortex-reasoning'
-  | 'cortex-query-pipeline'
-  | 'intent-parser'
-  | 'phone-voice-realtime';
-
-export type CognitiveReachability = 'member' | 'memberless' | 'owner-only';
-
-export type CognitiveAuthorityPath =
-  | 'Flow confirmation boundary'
-  | 'Cortex autonomy orchestrator'
-  | 'none (read-only)';
-
-export type CognitiveEntrySignal =
-  | 'flow-chat'
-  | 'flow-stream-chat'
-  | 'processConsciously'
-  | 'processQuery'
-  | 'model-tools-call';
-
-export interface CognitiveRuntimeEntry {
-  readonly runtimeId: CognitiveRuntimeId;
-  readonly file: string;
-  readonly method: string;
-  readonly signal: CognitiveEntrySignal;
-  readonly reachableBy: CognitiveReachability;
-  readonly toolsOffered: boolean;
-  readonly authorityPath: CognitiveAuthorityPath;
-  readonly notes: string;
-}
-
-/** Intentionally empty in pure tests-only RED commit. */
-const COGNITIVE_RUNTIME_ENTRIES: readonly CognitiveRuntimeEntry[] = [];
+import {
+  COGNITIVE_RUNTIME_ENTRIES,
+  type CognitiveAuthorityPath,
+  type CognitiveEntrySignal,
+  type CognitiveReachability,
+  type CognitiveRuntimeEntry,
+  type CognitiveRuntimeId,
+} from './cognitive-runtime-registry';
 
 const REPO_ROOT = path.resolve(__dirname, '../../../../..');
 const SERVER_SRC_DIR = path.join(REPO_ROOT, 'apps/server/src');
@@ -147,6 +119,23 @@ function typeNodeReferences(
 
 function collectFlowOrchestratorReceivers(sf: ts.SourceFile): Set<string> {
   const names = new Set<string>();
+  const helperMethods = new Set<string>();
+
+  const findHelpers = (node: ts.Node) => {
+    if (ts.isJSDoc(node)) return;
+    if (
+      (ts.isMethodDeclaration(node) || ts.isFunctionDeclaration(node)) &&
+      node.name &&
+      (typeNodeReferences(node.type, 'FlowOrchestratorService') ||
+        (node.body && node.body.getText(sf).includes('FlowOrchestratorService')))
+    ) {
+      const name = ts.isIdentifier(node.name) ? node.name.text : staticPropKey(node.name);
+      if (name) helperMethods.add(name);
+    }
+    ts.forEachChild(node, findHelpers);
+  };
+  findHelpers(sf);
+
   const walk = (node: ts.Node) => {
     if (ts.isJSDoc(node)) return;
     if (
@@ -158,14 +147,23 @@ function collectFlowOrchestratorReceivers(sf: ts.SourceFile): Set<string> {
     } else if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
       if (typeNodeReferences(node.type, 'FlowOrchestratorService')) {
         names.add(node.name.text);
-      } else if (node.initializer && ts.isCallExpression(unwrapExpr(node.initializer))) {
-        const call = unwrapExpr(node.initializer) as ts.CallExpression;
-        if (
-          call.arguments.some(
-            (a) => ts.isIdentifier(a) && a.text === 'FlowOrchestratorService',
-          )
-        ) {
-          names.add(node.name.text);
+      } else if (node.initializer) {
+        const init = unwrapExpr(node.initializer);
+        if (ts.isCallExpression(init)) {
+          const callee = unwrapExpr(init.expression);
+          const calleeName = ts.isIdentifier(callee)
+            ? callee.text
+            : ts.isPropertyAccessExpression(callee)
+              ? callee.name.text
+              : null;
+          if (
+            (calleeName && helperMethods.has(calleeName)) ||
+            init.arguments.some(
+              (a) => ts.isIdentifier(a) && a.text === 'FlowOrchestratorService',
+            )
+          ) {
+            names.add(node.name.text);
+          }
         }
       }
     }
@@ -439,6 +437,13 @@ describe('RR-COG-RUNTIME-ENTRY-CENSUS: KEY cognitive runtime entry & tool-offeri
         'apps/server/src/modules/key-cortex/key-cortex-consciousness.service.ts',
       ) ?? '';
     expect(consciousnessSrc).toContain('mayReadFullKeyContext(');
+
+    // Negative control (DoD): deleting any row from the real registry fails the audit
+    const truncatedAudit = auditCognitiveRuntimeEntries(
+      sourceMap,
+      COGNITIVE_RUNTIME_ENTRIES.slice(1),
+    );
+    expect(truncatedAudit.unregistered.length).toBeGreaterThanOrEqual(1);
   });
 
   it('NEGATIVE CONTROLS: catches unregistered processConsciously and toolChoice calls, rejects non-owner-only processConsciously, catches deleted/stale rows, and ignores comments', () => {
