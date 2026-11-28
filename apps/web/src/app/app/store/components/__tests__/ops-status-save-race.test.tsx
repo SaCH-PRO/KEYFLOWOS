@@ -220,4 +220,20 @@ describe("P237 R2 (P280): the status toggle waits for the save in flight", () =>
     await act(async () => { release(ok({})); });
     await waitFor(() => expect(screen.getAllByRole("button", { name: /^(Pause|Go Live)$/ })[0]).toBeEnabled());
   });
+  it("the Go Live suggestion, pressed while the status save is in flight, sends no second save (the handler refuses)", async () => {
+    storeEnabled = false;
+    client.fetchStorefrontConfig.mockImplementation(async () =>
+      ok({ hero: {}, appearance: {}, merchandising: {}, promotions: {}, socialProof: {}, seo: {}, storeSettings: { storeStatus: "paused" } }));
+    // both writes held: the store stays offline, so the "Go Live" suggestion stays on screen
+    client.updateBusiness.mockImplementation(() => new Promise(() => {}));
+    client.updateStorefrontConfig.mockImplementation(() => new Promise(() => {}));
+    render(<Operations />);
+    const [statusCard] = await screen.findAllByRole("button", { name: "Go Live" });
+    await act(async () => { fireEvent.click(statusCard); });
+    await waitFor(() => expect(client.updateStorefrontConfig).toHaveBeenCalledTimes(1));
+    const suggestion = screen.getAllByRole("button", { name: "Go Live" }).find((b) => b !== statusCard && !(b as HTMLButtonElement).disabled);
+    expect(suggestion, "the Go Live suggestion is not on screen").toBeTruthy();
+    await act(async () => { fireEvent.click(suggestion!); });
+    expect(client.updateStorefrontConfig, "the suggestion sent a second status save mid-flight").toHaveBeenCalledTimes(1);
+  });
 });

@@ -645,6 +645,9 @@ export function useStoreData() {
    * handleSaveConfig called in the same tick sends this render's storefrontConfig, from before the change.
    */
   function handleConfigChangeAndSave(section: string, updates: Record<string, unknown>) {
+    // R2-2: refused before anything changes, as handleReorderProducts is: a call made for a business no longer shown
+    // must not apply its change to the shown business's config either.
+    if (!businessId || !isCurrent(businessId) || refuse(canSaveStorefront, "storefront settings")) return Promise.resolve();
     handleConfigChange(section, updates);
     return saveConfig(withConfigChange(storefrontConfig, section, updates));
   }

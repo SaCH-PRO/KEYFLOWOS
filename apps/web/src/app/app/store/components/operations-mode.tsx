@@ -520,6 +520,8 @@ export function OperationsMode({
   const hasContact = !!(contactOptions.whatsappNumber || contactOptions.email || contactOptions.phone);
 
   function handleStatusChange(newStatus: StoreStatus) {
+    // P280: one status save at a time; a press while one is in flight does nothing (the toggle is disabled too).
+    if (configSaving) return;
     if (newStatus === "active" && !storeEnabled) {
       onToggleStoreEnabled();
     } else if (newStatus !== "active" && storeEnabled) {
@@ -600,7 +602,9 @@ export function OperationsMode({
         </div>
         <button
           onClick={() => handleStatusChange(storeStatus === "active" ? "paused" : "active")}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold min-h-[40px] transition-all hover:opacity-90"
+          disabled={configSaving}
+          aria-busy={configSaving || undefined}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold min-h-[40px] transition-all hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
           style={{
             background: storeStatus === "active" ? "hsl(var(--kf-warning)/0.15)" : "hsl(var(--kf-success)/0.15)",
             color: storeStatus === "active" ? "hsl(var(--kf-warning))" : "hsl(var(--kf-success))",
