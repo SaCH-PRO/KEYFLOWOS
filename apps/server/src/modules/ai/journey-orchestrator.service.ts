@@ -90,12 +90,13 @@ export class JourneyOrchestratorService implements OnModuleInit {
     }
 
     // Evaluate which steps should execute
+    const boundPayload = { ...(payload ?? {}), businessId };
     const previousResults: Record<string, any>[] = [];
     const stepStates: Array<{ stepIndex: number; status: string; result?: any; error?: string }> = [];
 
     for (let i = 0; i < template.steps.length; i++) {
       const step = template.steps[i];
-      const shouldRun = this.shouldExecuteStep(step, payload, previousResults);
+      const shouldRun = this.shouldExecuteStep(step, boundPayload, previousResults);
       stepStates.push({ stepIndex: i, status: shouldRun ? 'pending' : 'skipped' });
       if (!shouldRun) {
         previousResults.push({ skipped: true, stepIndex: i });
@@ -156,7 +157,7 @@ export class JourneyOrchestratorService implements OnModuleInit {
       const stepState = stepStates[i];
       if (stepState.status === 'skipped') continue;
 
-      const args = step.inputMapping(payload, previousResults);
+      const args = step.inputMapping(boundPayload, previousResults);
       const tier = this.governance.getToolTier(step.toolName);
 
       const planStep = await this.prisma.client.aiPlanStep.create({
