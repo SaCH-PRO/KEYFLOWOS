@@ -303,3 +303,127 @@ test('D-319/Q69: active control room is #273 with rollover rule across bundle an
   assert.match(measurement, /#273/, 'MEASUREMENT.md must reference #273');
 });
 
+// RR-STATUS-STALL-REPORT (D-261, D-262, D-141, D-222): deterministic, main-only stall signal on ready rows.
+test('RR-STATUS-STALL-REPORT: ready rows carry ready_since and stalled (14-day budget, main-only, unknown is not stalled)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { resolve, dirname } = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const { execFileSync } = await import('node:child_process');
+  const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+
+  const cDated = (subject, date, sha = 'a'.repeat(40)) => ({ sha, subject, date });
+  const mainDate = '2026-11-28T12:00:00Z';
+
+  // 1. Dependency A landed 30 days before mainDate -> B is stalled.
+  {
+    const plan = { packets: [pk('A', [], { track: 'launch' }), pk('B', ['A'], { track: 'launch' })], validation: { critical_path: [] } };
+    const commits = [cDated('fix(x): pkt/V1-A (compacted)', '2026-10-29T12:00:00Z', '1'.repeat(40))];
+    const s = buildStatus({ plan, prior: null, commits, branches: null, mainSha: 'f'.repeat(40), mainDate, baseSha: null });
+    const rowB = s.ready.find((r) => r.id === 'B');
+    assert.ok(rowB, 'B should be ready');
+    assert.equal(rowB.ready_since, '2026-10-29T12:00:00Z');
+    assert.equal(rowB.stalled, true);
+    const md = renderStatusMd(s);
+    assert.match(md, /Ready but stalled/i);
+    assert.match(md.split(/## Ready but stalled/i)[1].split('\n## ')[0], /\bB\b.*2026-10-29/);
+  }
+
+  // 2. Dependency A landed 3 days before mainDate -> B is NOT stalled.
+  {
+    const plan = { packets: [pk('A'), pk('B', ['A'])], validation: { critical_path: [] } };
+    const commits = [cDated('fix(x): pkt/V1-A (compacted)', '2026-11-25T12:00:00Z', '2'.repeat(40))];
+    const s = buildStatus({ plan, prior: null, commits, branches: null, mainSha: 'f'.repeat(40), mainDate, baseSha: null });
+    const rowB = s.ready.find((r) => r.id === 'B');
+    assert.equal(rowB.ready_since, '2026-11-25T12:00:00Z');
+    assert.equal(rowB.stalled, false);
+  }
+
+  // 3. Exact 14-day boundary: <= 14 days is not stalled; > 14 days is stalled.
+  {
+    const plan = { packets: [pk('A1'), pk('A2'), pk('B1', ['A1']), pk('B2', ['A2'])], validation: { critical_path: [] } };
+    const commits = [
+      cDated('fix(x): pkt/V1-A1 (compacted)', '2026-11-14T12:00:00Z', '3'.repeat(40)),
+      cDated('fix(x): pkt/V1-A2 (compacted)', '2026-11-14T11:59:59Z', '4'.repeat(40)),
+    ];
+    const s = buildStatus({ plan, prior: null, commits, branches: null, mainSha: 'f'.repeat(40), mainDate, baseSha: null });
+    assert.equal(s.ready.find((r) => r.id === 'B1').stalled, false, 'exactly 14 days does not exceed budget');
+    assert.equal(s.ready.find((r) => r.id === 'B2').stalled, true, '14 days + 1s exceeds budget');
+  }
+
+  // 4. Multiple dependencies: newest evidence date governs ready_since.
+  {
+    const plan = {
+      packets: [pk('A1'), pk('A2'), pk('A3'), pk('B_FRESH', ['A1', 'A2']), pk('B_STALE', ['A1', 'A3'])],
+      validation: { critical_path: [] },
+    };
+    const commits = [
+      cDated('fix(x): pkt/V1-A1 (compacted)', '2026-10-20T00:00:00Z', '5'.repeat(40)),
+      cDated('fix(x): pkt/V1-A2 (compacted)', '2026-11-26T00:00:00Z', '6'.repeat(40)),
+      cDated('fix(x): pkt/V1-A3 (compacted)', '2026-11-05T00:00:00Z', '7'.repeat(40)),
+    ];
+    const s = buildStatus({ plan, prior: null, commits, branches: null, mainSha: 'f'.repeat(40), mainDate, baseSha: null });
+    assert.equal(s.ready.find((r) => r.id === 'B_FRESH').ready_since, '2026-11-26T00:00:00Z');
+    assert.equal(s.ready.find((r) => r.id === 'B_FRESH').stalled, false);
+    assert.equal(s.ready.find((r) => r.id === 'B_STALE').ready_since, '2026-11-05T00:00:00Z');
+    assert.equal(s.ready.find((r) => r.id === 'B_STALE').stalled, true);
+  }
+
+  // 5. Dependency with no dated evidence (prior-status-file or undated commit) -> ready_since null, stalled false.
+  {
+    const plan = {
+      packets: [pk('P_OLD'), pk('C_UNDATED'), pk('C_DATED'), pk('D1', ['P_OLD']), pk('D2', ['C_UNDATED']), pk('D3', ['C_DATED', 'P_OLD'])],
+      validation: { critical_path: [] },
+    };
+    const prior = { packets: [{ id: 'P_OLD', status: 'merged-main' }] };
+    const commits = [
+      c('fix(x): pkt/V1-C_UNDATED (compacted)', '8'.repeat(40)),
+      cDated('fix(x): pkt/V1-C_DATED (compacted)', '2026-10-01T00:00:00Z', '9'.repeat(40)),
+    ];
+    const s = buildStatus({ plan, prior, commits, branches: null, mainSha: 'f'.repeat(40), mainDate, baseSha: null });
+    for (const id of ['D1', 'D2', 'D3']) {
+      const row = s.ready.find((r) => r.id === id);
+      assert.equal(row.ready_since, null, `${id}: unknown dependency date must yield ready_since=null`);
+      assert.equal(row.stalled, false, `${id}: unknown is not stalled`);
+    }
+  }
+
+  // 6. No dependencies: uses plan snapshot date (or null when plan has none).
+  {
+    const planWithSnap = {
+      _about: { snapshot: '2026-11-10 21:50Z; 196 packets' },
+      packets: [pk('ROOT_STALE')],
+      validation: { critical_path: [] },
+    };
+    const sStale = buildStatus({ plan: planWithSnap, prior: null, commits: [], branches: null, mainSha: 'f'.repeat(40), mainDate, baseSha: null });
+    assert.equal(sStale.ready[0].ready_since, '2026-11-10T21:50:00Z');
+    assert.equal(sStale.ready[0].stalled, true);
+
+    const sFresh = buildStatus({ plan: planWithSnap, prior: null, commits: [], branches: null, mainSha: 'f'.repeat(40), mainDate: '2026-11-20T12:00:00Z', baseSha: null });
+    assert.equal(sFresh.ready[0].ready_since, '2026-11-10T21:50:00Z');
+    assert.equal(sFresh.ready[0].stalled, false);
+
+    const planNoSnap = { packets: [pk('ROOT_UNKNOWN')], validation: { critical_path: [] } };
+    const sUnknown = buildStatus({ plan: planNoSnap, prior: null, commits: [], branches: null, mainSha: 'f'.repeat(40), mainDate, baseSha: null });
+    assert.equal(sUnknown.ready[0].ready_since, null);
+    assert.equal(sUnknown.ready[0].stalled, false);
+  }
+
+  // 7. Determinism: running status.mjs twice on the same ref produces byte-identical output.
+  const run1 = execFileSync(process.execPath, [resolve(repoRoot, 'scripts/agent-memory/status.mjs'), '--stdout', '--ref', 'origin/main'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  });
+  const run2 = execFileSync(process.execPath, [resolve(repoRoot, 'scripts/agent-memory/status.mjs'), '--stdout', '--ref', 'origin/main'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  });
+  assert.equal(run1, run2, 'status.mjs --stdout must be byte-identical across runs on the same ref');
+  assert.match(run1, /## Ready but stalled/i);
+
+  // 8. README documents the 14-day stall budget and that the signal is informational.
+  const readme = readFileSync(resolve(repoRoot, 'docs/development/agent-memory/README.md'), 'utf8');
+  assert.match(readme, /14 days/i, 'README must document the 14-day stall budget');
+  assert.match(readme, /informational/i, 'README must state the stall signal is informational');
+});
+
+
