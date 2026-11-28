@@ -26,7 +26,7 @@ import {
   type MemoryReaderContext,
 } from './memory-class-read-projection';
 import { KeyCommandService } from '../ai/key-command.service';
-import { isToolAllowedInV1, v1ToolRefusalReasonForInvocation, V1_TOOL_UNAVAILABLE_MESSAGE } from '../ai/v1-tool-allowlist';
+import { isToolAllowedInV1, v1ToolRefusalReason, v1ToolRefusalReasonForInvocation, V1_TOOL_UNAVAILABLE_MESSAGE } from '../ai/v1-tool-allowlist';
 import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
 import { AutonomyOrchestratorService } from '../key-autonomy/autonomy-orchestrator.service';
 import { AutonomyLevelService } from '../key-autonomy/autonomy-level.service';
@@ -696,8 +696,27 @@ export class KeyCortexActionsService implements OnModuleInit {
     };
   }
 
-  private async handleGenerateReport(_params: Record<string, unknown>, _businessId: string): Promise<KeyCortexToolResult> {
-    return { success: false, error: V1_TOOL_UNAVAILABLE_MESSAGE };
+  private async handleGenerateReport(params: Record<string, unknown>, businessId: string): Promise<KeyCortexToolResult> {
+    const v1Refusal = v1ToolRefusalReason('cortex.generate_report');
+    if (v1Refusal) {
+      return { success: false, error: v1Refusal };
+    }
+    const { reportType, timeframe = '30d', format = 'pdf' } = params;
+    const report = await (this.prisma.client as any).report.create({
+      data: {
+        type: String(reportType),
+        timeframe: String(timeframe),
+        format: String(format),
+        businessId,
+        status: 'generating',
+        createdAt: new Date(),
+      },
+    });
+    await (this.commandService as any).enqueue({
+      type: 'GENERATE_REPORT',
+      payload: { reportId: report.id, reportType, timeframe, format, businessId },
+    });
+    return { success: true, data: { reportId: report.id, status: 'generating' } };
   }
 
   private async handleExecuteFlow(params: Record<string, unknown>, businessId: string): Promise<KeyCortexToolResult> {
