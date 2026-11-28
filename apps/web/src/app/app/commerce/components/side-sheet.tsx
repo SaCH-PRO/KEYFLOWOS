@@ -11,23 +11,35 @@ import { useIsMobile } from "@/hooks/use-is-mobile";
  * an id or label with any characters is matched and the lookup cannot throw.
  */
 type FocusSnapshot = {
-  /** The panel itself was focused (or focus is on something with no position among the focusables). */
+  /** The panel itself was focused. */
   panel: boolean;
-  /** Each identifier the control carries, with the control's index among the elements carrying the same value. */
-  ids: Array<{ attr: "id" | "name" | "aria-label"; value: string; nth: number }>;
-  /** Its index among the panel's focusables in DOM order, with its tag and type, for a control with no identifier. */
+  /**
+   * Each identifier the control carries (an attribute, or the text of its <label>s), with how many elements in the
+   * panel carried that value and which of them this control was.
+   */
+  ids: Array<{ key: IdKey; value: string; nth: number; count: number }>;
+  /** Its index among the panel's focusables, and the whole sequence of their tag:type (P263 R2-1). */
   index: number;
-  tag: string;
-  type: string;
+  sequence: string[];
   /** The control itself: detached by the remount, it still holds its caret and selection, read when refocusing. */
   node: HTMLElement | null;
 };
+type IdKey = "id" | "name" | "aria-label" | "placeholder" | "label";
+const ID_KEYS: IdKey[] = ["id", "name", "aria-label", "placeholder", "label"];
 const FOCUSABLE = 'a[href],button,input,select,textarea,[tabindex],[contenteditable="true"]';
 function focusablesIn(panel: HTMLElement): HTMLElement[] {
   return Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => el !== panel && el.getAttribute("tabindex") !== "-1");
 }
-function carrying(panel: HTMLElement, attr: string, value: string): HTMLElement[] {
-  return Array.from(panel.querySelectorAll<HTMLElement>("*")).filter((el) => el.getAttribute(attr) === value);
+const signature = (el: HTMLElement) => `${el.tagName}:${el.getAttribute("type") ?? ""}`;
+/** An identifier's value on an element: an attribute, or (P263 R2-1) the text of the element's <label>s. */
+function idValue(el: HTMLElement, key: IdKey): string | null {
+  if (key !== "label") return el.getAttribute(key) || null;
+  const labels = (el as HTMLInputElement).labels;
+  const text = labels ? Array.from(labels).map((l) => (l.textContent ?? "").trim()).filter(Boolean).join(" ") : "";
+  return text || null;
+}
+function carrying(panel: HTMLElement, key: IdKey, value: string): HTMLElement[] {
+  return Array.from(panel.querySelectorAll<HTMLElement>("*")).filter((el) => idValue(el, key) === value);
 }
 function selectionOf(el: HTMLElement): [number, number] | null {
   if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return null;
@@ -38,31 +50,33 @@ function selectionOf(el: HTMLElement): [number, number] | null {
   }
 }
 function snapshotOf(el: HTMLElement, panel: HTMLElement): FocusSnapshot {
-  if (el === panel) return { panel: true, ids: [], index: -1, tag: "", type: "", node: null };
+  if (el === panel) return { panel: true, ids: [], index: -1, sequence: [], node: null };
   const ids: FocusSnapshot["ids"] = [];
-  for (const attr of ["id", "name", "aria-label"] as const) {
-    const value = el.getAttribute(attr);
-    if (value) ids.push({ attr, value, nth: carrying(panel, attr, value).indexOf(el) });
+  for (const key of ID_KEYS) {
+    const value = idValue(el, key);
+    if (!value) continue;
+    const matches = carrying(panel, key, value);
+    ids.push({ key, value, nth: matches.indexOf(el), count: matches.length });
   }
-  return {
-    panel: false, ids, index: focusablesIn(panel).indexOf(el),
-    tag: el.tagName, type: el.getAttribute("type") ?? "", node: el,
-  };
+  const focusables = focusablesIn(panel);
+  return { panel: false, ids, index: focusables.indexOf(el), sequence: focusables.map(signature), node: el };
 }
 /** The control in `panel` that the snapshot names, or null (then the panel is focused). */
 function findAgain(snap: FocusSnapshot, panel: HTMLElement): HTMLElement | null {
   if (snap.panel) return null;
   try {
-    for (const { attr, value, nth } of snap.ids) {
-      const matches = carrying(panel, attr, value);
-      // P263 R1-2: an identifier is used only when it names this control: exactly one match, or the same index among
-      // as many matches as before. P263 R1-3: one that finds nothing (a useId id that changed) falls through.
-      if (matches.length === 1) return matches[0];
-      if (matches.length > 1 && nth >= 0 && matches[nth]) return matches[nth];
+    for (const { key, value, nth, count } of snap.ids) {
+      const matches = carrying(panel, key, value);
+      // P263 R1-2, R2-2: an identifier names this control when it matches one element, or the same one of as many
+      // matches as before. P263 R1-3: one that finds nothing (a useId id that changed) falls through.
+      if (matches.length === 1 && count === 1) return matches[0];
+      if (matches.length > 1 && matches.length === count && nth >= 0) return matches[nth];
     }
-    // P263 R1-1: no identifier: the same position among the focusables, if it is the same kind of control.
-    const at = snap.index >= 0 ? focusablesIn(panel)[snap.index] : undefined;
-    if (at && at.tagName === snap.tag && (at.getAttribute("type") ?? "") === snap.type) return at;
+    // P263 R1-1, R2-1: no identifier names it: the same position, only when the panel's focusables are the same
+    // controls in the same order (any added, removed or reordered control could put a different field there).
+    const focusables = focusablesIn(panel);
+    const same = focusables.length === snap.sequence.length && focusables.every((el, i) => signature(el) === snap.sequence[i]);
+    if (same && snap.index >= 0) return focusables[snap.index] ?? null;
   } catch {
     // never let a lookup throw out of the layout effect: focus the panel instead
   }
@@ -162,7 +176,18 @@ export function SideSheet({
       focusedRef.current = el && panel && panel.contains(el) ? snapshotOf(el, panel) : null;
     };
     document.addEventListener("focusin", onFocusIn);
-    return () => document.removeEventListener("focusin", onFocusIn);
+    // P263 R2-1: a control added or removed before the focused one (a Retry that goes away) changes its position: the
+    // snapshot is taken again whenever the panel's content changes while focus stays in it.
+    const observer = typeof MutationObserver === "undefined" ? null : new MutationObserver(() => {
+      const panel = panelRef.current;
+      const el = document.activeElement as HTMLElement | null;
+      if (panel && el && panel.contains(el)) focusedRef.current = snapshotOf(el, panel);
+    });
+    if (observer && panelRef.current) observer.observe(panelRef.current, { childList: true, subtree: true, attributes: true });
+    return () => {
+      document.removeEventListener("focusin", onFocusIn);
+      observer?.disconnect();
+    };
   }, [open]);
   const layoutRef = useRef(isMobile);
   useLayoutEffect(() => {

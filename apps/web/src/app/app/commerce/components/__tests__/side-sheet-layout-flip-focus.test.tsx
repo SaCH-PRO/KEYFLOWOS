@@ -91,13 +91,14 @@ describe("P263: focus stays in the sheet across a layout flip", () => {
       return (
         <SideSheet open onClose={() => {}} title="Edit Expense">
           <PhoneOnlySelect />
-          <input placeholder="no identifier" />
+          {/* P263 R2: a placeholder now identifies a field, so this one carries none (a test id is not read). */}
+          <input data-testid="no-identifier" />
         </SideSheet>
       );
     }
     render(<Shifting />);
     await settle();
-    (screen.getByPlaceholderText("no identifier") as HTMLElement).focus();
+    screen.getByTestId("no-identifier").focus();
     await flip(true);
     expect(document.activeElement, "focus fell to <body>").toBe(screen.getByRole("dialog"));
   });
