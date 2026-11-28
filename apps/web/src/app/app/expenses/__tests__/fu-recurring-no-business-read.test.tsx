@@ -161,6 +161,15 @@ describe("P254: the recurring panel with no business", () => {
     await settle();
     expect(screen.queryByRole("dialog"), "the builder opened with no business").toBeNull();
   });
+  it("R1-2: a business given after mount, then a New request, opens the builder", async () => {
+    const el = (b: string | null, t: number) => <RecurringExpensesPanel businessId={b} categories={[]} triggerNew={t} />;
+    const view = render(el(null, 0));
+    await settle();
+    view.rerender(el("biz_A", 0));
+    await settle();
+    view.rerender(el("biz_A", 1));
+    expect(await screen.findByRole("dialog")).toBeTruthy();
+  });
   it("R1-2 control: with a business, a New request opens the builder", async () => {
     const el = (t: number) => <RecurringExpensesPanel businessId="biz_A" categories={[]} triggerNew={t} />;
     const view = render(el(0));
