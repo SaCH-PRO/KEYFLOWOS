@@ -132,6 +132,10 @@ afterEach(() => cleanup());
  * right after the call-only wait (afterRequest), so a lookup made at once always runs before any reply.
  */
 const gate = { release: () => {} };
+// P265 R2: the whole page mounts in most of these cases; under a loaded parallel run a case can outlast the 5 s
+// default (seen: COR MINOR-2, COR MINOR-6). The test timeout is longer, as in expenses-tabs-mounted; what each case
+// asserts is unchanged, and only the waits that ran out under load are given explicit timeouts.
+vi.setConfig({ testTimeout: 30000 });
 function holdReads(fns: Array<ReturnType<typeof vi.fn>>) {
   let release: () => void = () => {};
   const opened = new Promise<void>((r) => { release = r; });
@@ -281,14 +285,14 @@ describe("COR MINOR-2: the toolbar upload keeps the Drive copy", () => {
     render(<ExpensesInboxPage />);
     await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled());
     const file = photo();
-    fireEvent.change(await screen.findByLabelText(/^upload receipt$/i), { target: { files: [file] } });
-    const sheet = await screen.findByRole("dialog");
+    fireEvent.change(await screen.findByLabelText(/^upload receipt$/i, {}, { timeout: 10000 }), { target: { files: [file] } });
+    const sheet = await screen.findByRole("dialog", {}, { timeout: 10000 });
     fireEvent.change(within(sheet).getByPlaceholderText(/What was this expense for|description/i), { target: { value: "Flour" } });
     fireEvent.change(within(sheet).getByPlaceholderText("0.00"), { target: { value: "10" } });
     const buttons = within(sheet).getAllByRole("button", { name: /^(add|save|create)( expense)?$/i });
     fireEvent.click(buttons[buttons.length - 1]);
-    await waitFor(() => expect(client.createExpense).toHaveBeenCalled());
-    await waitFor(() => expect(uploadToDrive).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(client.createExpense).toHaveBeenCalled(), { timeout: 10000 });
+    await waitFor(() => expect(uploadToDrive).toHaveBeenCalledTimes(1), { timeout: 10000 });
     expect(uploadToDrive.mock.calls[0][0]).toMatchObject({ businessId: "biz_A", entityType: "expense", entityId: "exp_new", mimeType: "image/jpeg" });
   });
 });
@@ -366,7 +370,7 @@ async function recurringOpensOnce() {
   // P265 R1-2: the same for the Recurring tab.
   fireEvent.click(await screen.findByRole("tab", { name: "Recurring" }, { timeout: 10000 }));
   // R26-6: the button is offered once the Recurring list's read has answered, so it is awaited.
-  fireEvent.click(await screen.findByRole("button", { name: /new recurring expense/i }));
+  fireEvent.click(await screen.findByRole("button", { name: /new recurring expense/i }, { timeout: 10000 }));
   expect(await screen.findByRole("dialog")).toBeTruthy();
   fireEvent.click(screen.getByRole("tab", { name: "Expenses" }));
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
