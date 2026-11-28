@@ -176,7 +176,7 @@ function parseIsoDate(raw) {
   }
   const ms = Date.parse(normalized);
   if (!Number.isFinite(ms)) return null;
-  const iso = m[4] !== undefined && m[6] !== undefined && !trimmed.includes(' ') ? trimmed : normalized;
+  const iso = m[4] !== undefined && m[6] !== undefined && m[8] !== undefined && !trimmed.includes(' ') ? trimmed : normalized;
   return { ms, iso };
 }
 
@@ -186,7 +186,7 @@ export function planSnapshotDate(plan) {
     ? plan._about.snapshot
     : (typeof plan?.snapshot_date === 'string' ? plan.snapshot_date : null);
   if (!raw) return null;
-  const m = raw.trim().match(/^(\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?)/);
+  const m = raw.trim().match(/^(\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?)(?=$|[\s;,)])/);
   if (!m) return null;
   return parseIsoDate(m[1])?.iso ?? null;
 }
