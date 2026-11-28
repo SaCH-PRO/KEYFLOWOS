@@ -9,7 +9,7 @@ import { useState } from "react";
 import { render, screen, cleanup, fireEvent, act } from "@testing-library/react";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, relative, sep } from "node:path";
+import { dirname, join, relative } from "node:path";
 import ts from "typescript";
 
 import { SideSheet } from "../side-sheet";
@@ -84,15 +84,17 @@ for (const layout of ["desktop", "phone"] as const) {
  * components/ui/side-sheet.tsx, a different component.
  */
 const MODULE_EXTS = ["tsx", "ts", "jsx", "js", "mjs", "cjs"];
-/** The module specifiers a source text imports (R3: regexes over the text). */
+/**
+ * The module specifiers a source text imports, read by the TypeScript parser (P257 R4-1): static imports, `import
+ * type`, re-exports, `import()` (spaced, or a no-substitution template literal; next/dynamic's inner import) and
+ * `require()`. An import in a comment is not one.
+ */
 function specifiersIn(text: string): string[] {
-  const SPEC = String.raw`["']([^"']*side-sheet(?:\.(?:tsx|ts|jsx|js|mjs|cjs))?)["']`;
-  const forms = [new RegExp(String.raw`from\s+` + SPEC, "g"), new RegExp(String.raw`\b(?:import|require)\(\s*` + SPEC + String.raw`\s*\)`, "g")];
-  return forms.flatMap((re) => [...text.matchAll(re)].map((m) => m[1]));
+  return ts.preProcessFile(text, true, true).importedFiles.map((f) => f.fileName);
 }
-/** A path written with / (R3: split on this platform's separator). */
+/** A path written with / whatever separator it was written with (P257 R3-3, R4-2: pure, so testable anywhere). */
 function toSlashes(p: string): string {
-  return p.split(sep).join("/");
+  return p.replace(/\\/g, "/");
 }
 /** The module path a specifier names (no extension), or null for a package. */
 function resolveSpec(fromAbs: string, spec: string, root: string): string | null {
@@ -101,9 +103,21 @@ function resolveSpec(fromAbs: string, spec: string, root: string): string | null
   if (bare.startsWith(".")) return join(dirname(fromAbs), bare);
   return null;
 }
-/** Whether `spec`, imported by the file at `fromAbs`, reaches the module `target` (R3: names it directly). */
-function reaches(fromAbs: string, spec: string, target: string, root: string): boolean {
-  return resolveSpec(fromAbs, spec, root) === target;
+/**
+ * Whether `spec`, imported by the file at `fromAbs`, reaches the module `target`: it names it, or it names a
+ * directory whose index re-exports it (followed through; P257 R4-1, so a barrel is never silently missed).
+ */
+function reaches(fromAbs: string, spec: string, target: string, root: string, seen = new Set<string>()): boolean {
+  const resolved = resolveSpec(fromAbs, spec, root);
+  if (resolved === null) return false;
+  if (resolved === target) return true;
+  for (const ext of MODULE_EXTS) {
+    const index = join(resolved, `index.${ext}`);
+    if (seen.has(index) || !existsSync(index)) continue;
+    seen.add(index);
+    if (specifiersIn(readFileSync(index, "utf8")).some((s) => reaches(index, s, target, root, seen))) return true;
+  }
+  return false;
 }
 /** Every non-test module under root (every kind in MODULE_EXTS), relative to root, written with /. */
 function sources(root: string, dir = root): string[] {
