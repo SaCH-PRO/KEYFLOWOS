@@ -391,3 +391,65 @@ describe("P254 R5-1 at the panel: mounted with a New already counted", () => {
     expect(await screen.findByRole("dialog", {}, LONG), "a New after the reset was taken for the mount-time value").toBeTruthy();
   });
 });
+
+describe("P254 R5-3: the queued open fires after the next business has committed, before its passive effects", () => {
+  /**
+   * The window the reviewer found (a New committed at default priority under A, the switch committed a macrotask
+   * later): React flushes A's effects while rendering B, so the open is queued for A, and it fires once B has
+   * committed but before B's passive effects run. Here the open A's New queued is captured, and replayed from a probe's
+   * layout effect in the commit that shows the next business: after its DOM and the panel's layout effects, before any
+   * passive effect. That is that window, deterministically.
+   */
+  function Probe({ fire, run }: { fire: boolean; run: () => void }) {
+    React.useLayoutEffect(() => { if (fire) run(); });
+    return null;
+  }
+  function harness() {
+    let queued: (() => void) | null = null;
+    let fired = false;
+    const run = () => { if (queued && !fired) { fired = true; queued(); } };
+    const el = (b: string | null, t: number, fire: boolean) => (
+      <>
+        <RecurringExpensesPanel businessId={b} categories={[]} triggerNew={t} />
+        <Probe fire={fire} run={run} />
+      </>
+    );
+    return {
+      el,
+      /** New pressed on A, its queued open captured and not run. */
+      async newOnA(view: ReturnType<typeof render>) {
+        const spy = vi.spyOn(globalThis, "queueMicrotask").mockImplementation((cb: () => void) => { queued = cb; });
+        view.rerender(el("biz_A", 1, false));
+        spy.mockRestore();
+        expect(queued, "New queued no open").toBeTruthy();
+      },
+    };
+  }
+  it("A, New, then B: the open replayed in B's commit opens no builder", async () => {
+    const h = harness();
+    const view = render(h.el("biz_A", 0, false));
+    await settle();
+    await h.newOnA(view);
+    act(() => { view.rerender(h.el("biz_B", 1, true)); });
+    await settle();
+    expect(screen.queryByRole("dialog"), "A's New opened the builder under B").toBeNull();
+  });
+  it("A, New, then B, then A again before it fires: no builder (the New was made before a switch)", async () => {
+    const h = harness();
+    const view = render(h.el("biz_A", 0, false));
+    await settle();
+    await h.newOnA(view);
+    act(() => { view.rerender(h.el("biz_B", 1, false)); });
+    act(() => { view.rerender(h.el("biz_A", 1, true)); });
+    await settle();
+    expect(screen.queryByRole("dialog"), "a New made before A -> B -> A opened the builder").toBeNull();
+  });
+  it("control: A, New, the open replayed in a commit that keeps A: the builder opens", async () => {
+    const h = harness();
+    const view = render(h.el("biz_A", 0, false));
+    await settle();
+    await h.newOnA(view);
+    act(() => { view.rerender(h.el("biz_A", 1, true)); });
+    expect(await screen.findByRole("dialog", {}, LONG)).toBeTruthy();
+  });
+});
