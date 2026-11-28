@@ -502,7 +502,7 @@ function SectionEditor({
           label="Trust items"
           items={(data.items as string[]) ?? []}
           onChange={(items) => setField("items", items)}
-          placeholder="e.g. SSL secure checkout"
+          placeholder="e.g. a fact your customers can check"
         />
       )}
       {section.type === "gallery" && (

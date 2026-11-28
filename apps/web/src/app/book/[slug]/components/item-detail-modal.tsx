@@ -1,6 +1,6 @@
 "use client";
 
-import { X, Clock, Plus, CheckCircle2, Shield, Zap, MessageCircle, ExternalLink, Heart } from "lucide-react";
+import { X, Clock, Plus, CheckCircle2, MessageCircle, ExternalLink, Heart } from "lucide-react";
 import { formatPrice } from "@/lib/format";
 import type { CatalogItem } from "./types";
 import { ReviewSection } from "./review-display";
@@ -122,16 +122,9 @@ export function ItemDetailModal({
           )}
 
           <div className="flex items-center justify-between py-2">
-            <div className="flex flex-wrap gap-3">
-              <div className="flex items-center gap-1.5 text-xs text-gray-400">
-                <Shield className="w-3.5 h-3.5" style={{ color: primaryColor }} />
-                Secure Booking
-              </div>
-              <div className="flex items-center gap-1.5 text-xs text-gray-400">
-                <Zap className="w-3.5 h-3.5" style={{ color: primaryColor }} />
-                Instant Confirmation
-              </div>
-            </div>
+            {/* TRUST-BADGES-TRUE-ONLY (D-303): no 'Secure Booking' and no 'Instant Confirmation' (a booking can wait
+               for the owner); the product verifies neither. */}
+            <div />
             {onToggleWishlist && (
               <button
                 onClick={onToggleWishlist}

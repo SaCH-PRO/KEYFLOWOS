@@ -383,7 +383,7 @@ describe("/book/<slug> trust bar: today's hours on the business's clock, or noth
     window.localStorage.clear();
     render(<PublicBookingPage />);
     await screen.findAllByText("Pepper Co");
-    await waitFor(() => expect(screen.getByText("Secure Checkout")).toBeTruthy());
+    await waitFor(() => expect(screen.getByTitle("Wishlist")).toBeTruthy()); // the trust section has rendered
     return pageText();
   }
 
