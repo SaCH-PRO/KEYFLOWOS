@@ -155,4 +155,95 @@ describe('KeyCortexReflectionService', () => {
       await expect(svc.reflect('biz_1', 'reflection')).resolves.toBeDefined();
     });
   });
+
+  describe('RR-REFLECTION-HONEST: honest maintenance reporting and bounded in-process dream journal', () => {
+    it('runMaintenance reports "not run: <reason>" instead of fake success and records indicesUpdated: null, integrityChecked: false', async () => {
+      const session = await service.runMaintenance('biz_honest');
+
+      expect(session.type).toBe('maintenance');
+      expect(session.actionsTaken.some((a) => /updated\s+\d+\s+temporal memory indices/i.test(a))).toBe(false);
+      expect(session.actionsTaken.some((a) => /data integrity check passed/i.test(a))).toBe(false);
+
+      expect(session.actionsTaken.some((a) => /temporal.*not run:/i.test(a))).toBe(true);
+      expect(session.actionsTaken.some((a) => /integrity.*not run:/i.test(a))).toBe(true);
+
+      expect(session.metadata?.indicesUpdated).toBeNull();
+      expect(session.metadata?.integrityChecked).toBe(false);
+      expect(session.metadata?.integrityIssuesFound).toBeNull();
+
+      // getLastReflectionSession serves the same honest record to consciousness layer
+      const last = await service.getLastReflectionSession('biz_honest');
+      expect(last?.actionsTaken).toEqual(session.actionsTaken);
+      expect(last?.metadata?.indicesUpdated).toBeNull();
+      expect(last?.metadata?.integrityChecked).toBe(false);
+    });
+
+    it('caps in-process dreamJournal per business (evicting oldest), preserves tenant isolation, and marks entries persisted: false with zero new memory writes', async () => {
+      const { service: svc, prisma } = makeService();
+      const upsertSpy = vi.fn();
+      const createSpy = vi.fn();
+      (prisma.client as Record<string, unknown>).keyCortexMemory = {
+        upsert: upsertSpy,
+        create: createSpy,
+        findMany: vi.fn().mockResolvedValue([]),
+      };
+
+      const store = (
+        svc as unknown as {
+          storeDreamHypotheses: (businessId: string, hypotheses: Array<Record<string, unknown>>, parentId: string) => Promise<void>;
+        }
+      ).storeDreamHypotheses.bind(svc);
+
+      const batchSize = 150;
+      const baseTime = Date.UTC(2026, 10, 1, 0, 0, 0);
+      const batchA = Array.from({ length: batchSize }, (_, i) => ({
+        id: `hyp_a_${i}`,
+        description: `Hypothesis A #${i}`,
+        sources: ['src'],
+        confidence: 0.2,
+        creativityScore: 0.5,
+        status: 'pending',
+        businessId: 'biz_a',
+        createdAt: new Date(baseTime + i * 1000),
+      }));
+      await store('biz_a', batchA, 'dream_1');
+      await store(
+        'biz_b',
+        [
+          {
+            id: 'hyp_b_0',
+            description: 'Hypothesis B #0',
+            sources: ['src'],
+            confidence: 0.2,
+            creativityScore: 0.5,
+            status: 'pending',
+            businessId: 'biz_b',
+            createdAt: new Date(baseTime),
+          },
+        ],
+        'dream_b',
+      );
+
+      const journalA = await svc.getDreamJournal('biz_a');
+      expect(journalA.length).toBeLessThanOrEqual(100);
+      expect(journalA.length).toBeGreaterThan(0);
+      // Oldest dropped, newest retained
+      expect(journalA.some((h) => h.id === 'hyp_a_0')).toBe(false);
+      expect(journalA.some((h) => h.id === `hyp_a_${batchSize - 1}`)).toBe(true);
+      // Every in-process dream journal entry is explicitly marked persisted: false
+      for (const entry of journalA) {
+        expect(entry.persisted).toBe(false);
+      }
+
+      // Per-business isolation: biz_b untouched and marked persisted: false
+      const journalB = await svc.getDreamJournal('biz_b');
+      expect(journalB).toHaveLength(1);
+      expect(journalB[0].id).toBe('hyp_b_0');
+      expect(journalB[0].persisted).toBe(false);
+
+      // D-257: zero new KeyCortexMemory writes added by storing dream hypotheses
+      expect(upsertSpy).not.toHaveBeenCalled();
+      expect(createSpy).not.toHaveBeenCalled();
+    });
+  });
 });
