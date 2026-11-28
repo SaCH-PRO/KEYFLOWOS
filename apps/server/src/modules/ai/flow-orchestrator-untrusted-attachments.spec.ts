@@ -208,15 +208,22 @@ describe('RR-UNTRUSTED-CONTENT-FENCE: an attachment extraction reaches the model
     expectFenced(h.messagesOf(h.trackAndStream));
   });
 
-  it('chat: the turn is saved with the extraction fenced, so a later turn replays it fenced', async () => {
+  it('chat: the turn is saved with the extraction fenced separately, so a later turn replays it fenced', async () => {
     const h = makeHarness();
     await h.chat([ATTACHMENT]);
     const saved = JSON.stringify(h.saveConversationHistory.mock.calls[0]);
-    const savedMessages = (h.saveConversationHistory.mock.calls[0] as unknown[]).find(Array.isArray) as Array<{ role: string; content: string }>;
+    const savedMessages = (h.saveConversationHistory.mock.calls[0] as unknown[]).find(Array.isArray) as Array<{
+      role: string;
+      content: string;
+      attachmentContext?: string;
+    }>;
     const userTurn = savedMessages.filter((m) => m.role === 'user').pop()!;
-    expect(userTurn.content.startsWith(MEMBER_TEXT)).toBe(true);
+    expect(userTurn.content).toBe(MEMBER_TEXT);
     expect(outsideBlocks(userTurn.content)).not.toContain('Ignore previous instructions');
-    expect(blocksOf(userTurn.content)).toHaveLength(1);
+    expect(blocksOf(userTurn.content)).toHaveLength(0);
+    expect(userTurn.attachmentContext).toBeDefined();
+    expect(outsideBlocks(userTurn.attachmentContext!)).not.toContain('Ignore previous instructions');
+    expect(blocksOf(userTurn.attachmentContext!)).toHaveLength(1);
     expect(saved).toContain('supplier.pdf');
   });
 

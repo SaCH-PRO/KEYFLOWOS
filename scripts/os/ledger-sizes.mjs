@@ -9,7 +9,7 @@
 // Exit 1 on any parse failure — "constant not found" must never read as 0
 // (gate-vacuity rule: a reader that finds nothing must prove it looked).
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { extractInitializer, stringLiterals, recordNumericValues, recordKeyCount } from './lib.mjs';
@@ -17,7 +17,7 @@ import { extractInitializer, stringLiterals, recordNumericValues, recordKeyCount
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 // direction: 'shrink' = count may only go down; 'grow' = floor may only go up.
-const LEDGERS = [
+export const LEDGERS = [
   { name: 'tenant.acknowledged_unscoped', file: 'apps/server/src/core/prisma/tenant-model-list.spec.ts', constant: 'ACKNOWLEDGED_UNSCOPED', kind: 'strings', direction: 'shrink' },
   { name: 'tenant.never_scope', file: 'apps/server/src/core/prisma/tenant-model-list.spec.ts', constant: 'NEVER_SCOPE', kind: 'strings', direction: 'fixed' },
   { name: 'tenant.business_id_models', file: 'packages/db/src/client.ts', constant: 'BUSINESS_ID_MODELS', kind: 'strings', direction: 'grow' },
@@ -56,37 +56,81 @@ function countMarkdownRows(src, header) {
   return count;
 }
 
-const results = [];
-const errors = [];
-for (const l of LEDGERS) {
-  try {
-    const src = readFileSync(resolve(ROOT, l.file), 'utf8');
-    let value;
-    if (l.kind === 'md-rows') {
-      value = countMarkdownRows(src, l.header);
-    } else {
-      const init = extractInitializer(src, l.constant);
-      if (l.kind === 'strings') value = stringLiterals(init).length;
-      else if (l.kind === 'record-sum') value = recordNumericValues(init).reduce((a, b) => a + b, 0);
-      else if (l.kind === 'record-keys') value = recordKeyCount(init);
-      else if (l.kind === 'number') value = Number(init.trim());
+function isAbsenceError(ledger, err) {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (ledger.kind === 'md-rows') return msg.startsWith('table header not found:');
+  return msg === `constant ${ledger.constant} not found`;
+}
+
+/**
+ * Measure all registered ledgers using a caller-provided file reader.
+ * `readFile(relPath)` returns file contents as a string, or `null` when the
+ * file is genuinely absent in that tree.
+ *
+ * Returns `{ results, errors, absent }` where `absent` lists ledger names that
+ * did not exist in the tree (file, constant, or markdown table absent), while
+ * `errors` includes both absences and parse/anti-vacuity errors (so callers
+ * measuring HEAD fail closed on any missing or broken ledger).
+ */
+export function measure(readFile = (rel) => readFileSync(resolve(ROOT, rel), 'utf8')) {
+  const results = [];
+  const errors = [];
+  const absent = [];
+  for (const l of LEDGERS) {
+    try {
+      const src = readFile(l.file);
+      if (src === null || src === undefined) {
+        absent.push(l.name);
+        errors.push(`${l.name}: file not found (${l.file})`);
+        continue;
+      }
+      let value;
+      if (l.kind === 'md-rows') {
+        value = countMarkdownRows(src, l.header);
+      } else {
+        const init = extractInitializer(src, l.constant);
+        if (l.kind === 'strings') value = stringLiterals(init).length;
+        else if (l.kind === 'record-sum') value = recordNumericValues(init).reduce((a, b) => a + b, 0);
+        else if (l.kind === 'record-keys') value = recordKeyCount(init);
+        else if (l.kind === 'number') value = Number(init.trim());
+      }
+      if (!Number.isFinite(value)) throw new Error(`non-numeric result for ${l.name}`);
+      results.push({ name: l.name, file: l.file, constant: l.constant ?? l.header, direction: l.direction, value });
+    } catch (e) {
+      if (isAbsenceError(l, e)) absent.push(l.name);
+      errors.push(`${l.name}: ${e.message}`);
     }
-    if (!Number.isFinite(value)) throw new Error(`non-numeric result for ${l.name}`);
-    results.push({ name: l.name, file: l.file, constant: l.constant ?? l.header, direction: l.direction, value });
-  } catch (e) {
-    errors.push(`${l.name}: ${e.message}`);
+  }
+
+  // Anti-vacuity: the two constants that must be non-empty today. trpc.unchecked
+  // is legitimately 0 (a closed ledger) and has no floor.
+  const bidm = results.find((r) => r.name === 'tenant.business_id_models');
+  if (!bidm || bidm.value < 300) {
+    errors.push(`BUSINESS_ID_MODELS parsed as ${bidm?.value} (< 300) — the reader is blind`);
+  }
+
+  return { results, errors, absent };
+}
+
+function isMainModule() {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return resolve(process.argv[1]) === fileURLToPath(import.meta.url);
   }
 }
 
-if (errors.length > 0) {
-  console.error(`ledger-sizes: ${errors.length} parse failure(s):\n  ${errors.join('\n  ')}`);
-  process.exit(1);
+if (isMainModule()) {
+  const { results, errors } = measure();
+  if (errors.length > 0) {
+    const parseErrors = errors.filter((e) => !e.startsWith('BUSINESS_ID_MODELS parsed as '));
+    if (parseErrors.length > 0) {
+      console.error(`ledger-sizes: ${parseErrors.length} parse failure(s):\n  ${parseErrors.join('\n  ')}`);
+    } else {
+      console.error(`ledger-sizes: ${errors[0]}`);
+    }
+    process.exit(1);
+  }
+  console.log(JSON.stringify(results, null, 2));
 }
-// Anti-vacuity: the two constants that must be non-empty today. trpc.unchecked
-// is legitimately 0 (a closed ledger) and has no floor.
-const bidm = results.find((r) => r.name === 'tenant.business_id_models');
-if (!bidm || bidm.value < 300) {
-  console.error(`ledger-sizes: BUSINESS_ID_MODELS parsed as ${bidm?.value} (< 300) — the reader is blind`);
-  process.exit(1);
-}
-console.log(JSON.stringify(results, null, 2));

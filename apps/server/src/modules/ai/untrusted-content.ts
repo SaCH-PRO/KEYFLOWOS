@@ -251,6 +251,28 @@ export function fenceUntrusted(source: UntrustedSource, text: string | null | un
   return `<untrusted source="${source}" id="${id}">\n${inner}\n</untrusted id="${id}">`;
 }
 
+const SINGLE_FENCED_BLOCK_RE =
+  /^<untrusted source="([a-z_]+)" id="([0-9a-f]{16})">\n([\s\S]*)\n<\/untrusted id="([0-9a-f]{16})">$/;
+
+/**
+ * Cryptographically verifies that `block` is an unmodified single block produced by
+ * `fenceUntrusted(source, ...)`. Verifies SHA-256 id, marker cleanliness, invisible-char
+ * cleanliness, and bounded length (allowing capUntrusted's trailing truncation suffix
+ * without re-running capUntrusted and double-fencing already-capped blocks).
+ */
+export function isValidFencedUntrusted(source: UntrustedSource, block: string): boolean {
+  if (!SOURCES.has(source) || typeof block !== 'string') return false;
+  const m = SINGLE_FENCED_BLOCK_RE.exec(block);
+  if (!m || m[1] !== source || m[2] !== m[4]) return false;
+  const inner = m[3];
+  if (!inner.trim()) return false;
+  if (inner.length > UNTRUSTED_MAX_CHARS[source] + 80) return false;
+  if (withoutInvisible(inner) !== inner) return false;
+  if (neutraliseMarkers(inner) !== inner) return false;
+  const expectedId = createHash('sha256').update(`${source}\u0000${inner}`).digest('hex').slice(0, 16);
+  return expectedId === m[2];
+}
+
 const BLOCK_OPEN_CAPTURE_RE = /<untrusted source="[a-z_]+" id="([0-9a-f]{16})">\n/g;
 
 /**

@@ -65,7 +65,7 @@ jobs:
       # Explicit files or `<dir>/*.spec.mjs` globs, never a bare directory,
       # and no env (see the step above).
       - name: Check every script spec runs in CI
-        run: node --test scripts/ci/script-specs-in-ci.spec.mjs scripts/ci/ci-verdict.spec.mjs scripts/ci/verify-vitest-shards.spec.mjs scripts/ci/ci-pg-no-password.spec.mjs scripts/ci/merge-queue.spec.mjs scripts/research/research-corpus-parse.spec.mjs scripts/agent-memory/tests/*.spec.mjs scripts/intelligence/open_pr_inventory.spec.mjs scripts/agent-control/research/tests/*.spec.mjs
+        run: node --test scripts/ci/script-specs-in-ci.spec.mjs scripts/ci/ci-verdict.spec.mjs scripts/ci/gate-ledger-monotonic.spec.mjs scripts/ci/verify-vitest-shards.spec.mjs scripts/ci/ci-pg-no-password.spec.mjs scripts/ci/merge-queue.spec.mjs scripts/research/research-corpus-parse.spec.mjs scripts/agent-memory/tests/*.spec.mjs scripts/intelligence/open_pr_inventory.spec.mjs scripts/agent-control/research/tests/*.spec.mjs
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -938,6 +938,30 @@ jobs:
   #         vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
   #         vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
 
+  # RR-GATE-LEDGER-MONOTONIC (REC-ANTI-FAKE-GREEN, D-261, D-262, D-239):
+  # Compare every registered shrink-only ledger and floor ratchet between base
+  # and head via `git show` (no install, no override flags).
+  gate-ledgers:
+    name: Gate ledgers (monotonic)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Check registered gate ledgers did not move the wrong way
+        env:
+          GITHUB_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GITHUB_MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          GITHUB_BEFORE_SHA: ${{ github.event.before }}
+        run: node scripts/ci/gate-ledger-monotonic.mjs
+
   # RR-CI-REQUIRED-JOBS-AGGREGATE (REC-ANTI-FAKE-GREEN, D-239): the one check
   # that is red when any gating job failed, was skipped or was cancelled.
   # scripts/ci/ci-verdict.spec.mjs pins the shape (a job added to this file
@@ -947,7 +971,7 @@ jobs:
   ci-verdict:
     name: CI verdict (gating jobs)
     runs-on: ubuntu-latest
-    needs: [lint-and-typecheck, security-scan, build-server, build-web, e2e-mocked, test-server, test, test-proofs, test-web-api]
+    needs: [lint-and-typecheck, security-scan, build-server, build-web, e2e-mocked, test-server, test, test-proofs, test-web-api, gate-ledgers]
     if: always()
     steps:
       - name: Red unless every gating job succeeded
@@ -971,5 +995,6 @@ jobs:
           test=${{ needs.test.result }}
           test-proofs=${{ needs.test-proofs.result }}
           test-web-api=${{ needs.test-web-api.result }}
+          gate-ledgers=${{ needs.gate-ledgers.result }}
           RESULTS
           exit "$verdict"

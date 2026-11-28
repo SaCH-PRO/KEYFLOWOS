@@ -101,6 +101,18 @@ function makeRes() {
   return r;
 }
 
+/** Flip the first character of a base64url signature (always real MAC bits, never tail padding or identical suffix). */
+function tamperSignature(sig: string): string {
+  if (!sig.length) throw new Error('empty signature');
+  return `${sig[0] === 'A' ? 'B' : 'A'}${sig.slice(1)}`;
+}
+
+function tamperTokenSignature(token: string): string {
+  const parts = token.split('.');
+  if (parts.length !== 3) throw new Error('unexpected token shape');
+  return `${parts[0]}.${parts[1]}.${tamperSignature(parts[2])}`;
+}
+
 /** A request Twilio really signed (fixed test auth token; nothing leaves the process). */
 function signedInbound(businessId: string, body: Record<string, string>) {
   const originalUrl = `${INBOUND_PATH}?businessId=${encodeURIComponent(businessId)}`;
@@ -267,7 +279,7 @@ describe('the Twilio-verified inbound webhook hands the stream a signed tenant t
       'not-a-token',
       `${version}.${payload}`,
       `${version}.${forgedPayload}.${sig}`, // tenant swapped, signature kept
-      `${version}.${payload}.${sig.slice(0, -2)}AA`, // signature tampered
+      `${version}.${payload}.${tamperSignature(sig)}`, // signature tampered
       `v0.${payload}.${sig}`, // unknown version
       `${good}.extra`,
     ]) {
@@ -275,6 +287,19 @@ describe('the Twilio-verified inbound webhook hands the stream a signed tenant t
     }
     process.env.PHONE_STREAM_TOKEN_SECRET = OTHER_SECRET;
     expect(verify(good, { callSid: CALL_1 }), 'a token signed under another secret').toBeNull();
+  });
+
+  it('determinism (FU-TEST-FLAKES-2026-11-23): tamperSignature and tamperTokenSignature mutate any signature including AA suffixes', () => {
+    const endsWithAA = 'abcdefghijklmnopqrstuvwxyz0123456789_-abcAA';
+    expect(tamperSignature(endsWithAA)).not.toBe(endsWithAA);
+    const startsWithA = 'Abcdefghijklmnopqrstuvwxyz0123456789_-abcAA';
+    expect(tamperSignature(startsWithA)).not.toBe(startsWithA);
+    expect(tamperSignature('A')).toBe('B');
+    expect(tamperSignature('z')).toBe('A');
+    expect(() => tamperSignature('')).toThrow(/empty signature/);
+    const tok = `v1.payload.${endsWithAA}`;
+    expect(tamperTokenSignature(tok)).not.toBe(tok);
+    expect(() => tamperTokenSignature('malformed')).toThrow(/unexpected token shape/);
   });
 
   it('positive control: the webhook still refuses an unsigned request and emits no TwiML', () => {
@@ -325,7 +350,7 @@ describe('the media stream binds its tenant from the token only', () => {
   it('NEGATIVE CONTROL (pre-fix FAIL expected): a tampered token is closed before a session exists', async () => {
     const { closed } = await placeCall({
       overrideQuery: `?businessId=${BIZ_A}`,
-      tamper: (p) => ({ tenantToken: `${p.tenantToken.slice(0, -2)}AA` }),
+      tamper: (p) => ({ tenantToken: tamperTokenSignature(p.tenantToken) }),
     });
     expect(await closedWithin(closed)).toBe(1008);
     expect(openSession).not.toHaveBeenCalled();

@@ -43,7 +43,7 @@ query($owner: String!, $name: String!, $first: Int!, $cursor: String) {
     pullRequests(states: OPEN, first: $first, after: $cursor, orderBy: { field: CREATED_AT, direction: ASC }) {
       totalCount
       pageInfo { hasNextPage endCursor }
-      nodes { number headRefName isDraft }
+      nodes { number headRefName isDraft isCrossRepository headRepository { nameWithOwner } }
     }
   }
 }`;
@@ -113,14 +113,38 @@ async function fetchPage(fetchImpl, { token, owner, name, cursor }) {
     if (!node || typeof node !== 'object') throw new ListingError(LISTING_ERRORS.SHAPE, `node ${i} is not an object`);
     if (!Number.isSafeInteger(node.number) || node.number <= 0) throw new ListingError(LISTING_ERRORS.SHAPE, `node ${i} number unreadable: ${JSON.stringify(node.number)}`);
     if (typeof node.headRefName !== 'string' || !node.headRefName) throw new ListingError(LISTING_ERRORS.SHAPE, `node ${i} headRefName unreadable`);
-    return { number: node.number, headRefName: node.headRefName, isDraft: node.isDraft === true };
+    if (typeof node.isCrossRepository !== 'boolean') {
+      throw new ListingError(LISTING_ERRORS.SHAPE, `node ${i} isCrossRepository unreadable: ${JSON.stringify(node.isCrossRepository)}`);
+    }
+    let headRepositoryNameWithOwner = null;
+    if (node.headRepository === null) {
+      if (node.isCrossRepository === false) {
+        throw new ListingError(LISTING_ERRORS.SHAPE, `node ${i} headRepository is null for non-cross-repository PR`);
+      }
+    } else if (
+      !node.headRepository ||
+      typeof node.headRepository !== 'object' ||
+      typeof node.headRepository.nameWithOwner !== 'string' ||
+      !node.headRepository.nameWithOwner
+    ) {
+      throw new ListingError(LISTING_ERRORS.SHAPE, `node ${i} headRepository.nameWithOwner unreadable`);
+    } else {
+      headRepositoryNameWithOwner = node.headRepository.nameWithOwner;
+    }
+    return {
+      number: node.number,
+      headRefName: node.headRefName,
+      isDraft: node.isDraft === true,
+      isCrossRepository: node.isCrossRepository,
+      headRepositoryNameWithOwner,
+    };
   });
   return { totalCount: prs.totalCount, hasNextPage: info.hasNextPage, endCursor: info.endCursor ?? null, nodes };
 }
 
 /**
  * One whole enumeration of the open pull requests.
- * @returns {{totalCount: number, nodes: {number, headRefName, isDraft}[], pages: number}}
+ * @returns {{totalCount: number, nodes: {number, headRefName, isDraft, isCrossRepository, headRepositoryNameWithOwner}[], pages: number}}
  * @throws {ListingError} on any failure or inconsistency
  */
 export async function enumerateOpenPullRequests({ fetchImpl = globalThis.fetch, token, repository } = {}) {
@@ -163,10 +187,19 @@ export async function enumerateOpenPullRequests({ fetchImpl = globalThis.fetch, 
   return { totalCount, nodes, pages };
 }
 
+function isSameRepositoryHead(node, repository) {
+  const repo = String(repository || '').trim().toLowerCase();
+  if (!repo) return false;
+  if (node.isCrossRepository !== false) return false;
+  if (typeof node.headRepositoryNameWithOwner !== 'string' || !node.headRepositoryNameWithOwner) return false;
+  return node.headRepositoryNameWithOwner.toLowerCase() === repo;
+}
+
 /**
- * The impl/* PR numbers, ascending, from a complete and consistent
- * enumeration; a bounded whole-enumeration retry on churn.
- * @returns {{numbers: number[], totalCount: number, attempts: number, pages: number}}
+ * The same-repository impl/* PR numbers, ascending, from a complete and
+ * consistent enumeration; fork impl/* PRs are excluded and reported.
+ * Bounded whole-enumeration retry on churn.
+ * @returns {{numbers: number[], excludedForks: number[], totalCount: number, attempts: number, pages: number}}
  * @throws {ListingError}
  */
 export async function listOpenImplPrs({ fetchImpl, token, repository, attempts = MAX_ATTEMPTS, onRetry = () => {} } = {}) {
@@ -174,8 +207,10 @@ export async function listOpenImplPrs({ fetchImpl, token, repository, attempts =
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
       const { totalCount, nodes, pages } = await enumerateOpenPullRequests({ fetchImpl, token, repository });
-      const numbers = nodes.filter((n) => n.headRefName.startsWith(IMPL_PREFIX)).map((n) => n.number).sort((a, b) => a - b);
-      return { numbers, totalCount, attempts: attempt, pages };
+      const implNodes = nodes.filter((n) => n.headRefName.startsWith(IMPL_PREFIX));
+      const numbers = implNodes.filter((n) => isSameRepositoryHead(n, repository)).map((n) => n.number).sort((a, b) => a - b);
+      const excludedForks = implNodes.filter((n) => !isSameRepositoryHead(n, repository)).map((n) => n.number).sort((a, b) => a - b);
+      return { numbers, excludedForks, totalCount, attempts: attempt, pages };
     } catch (error) {
       lastError = error;
       if (!(error instanceof ListingError) || !RETRYABLE.has(error.code) || attempt === attempts) throw error;
@@ -194,6 +229,9 @@ export async function main({ env = process.env, fetchImpl = globalThis.fetch, st
       onRetry: (error, attempt) => stderr.write(`list-open-impl-prs: attempt ${attempt} inconsistent (${error.code}: ${error.detail}); enumerating again\n`),
     });
     stderr.write(`list-open-impl-prs: ${result.totalCount} open pull requests over ${result.pages} page(s), ${result.numbers.length} impl/* candidate(s), attempt ${result.attempts}\n`);
+    if (result.excludedForks.length) {
+      stderr.write(`list-open-impl-prs: excluded ${result.excludedForks.length} fork impl/* PR(s): ${result.excludedForks.map((n) => `#${n}`).join(', ')}\n`);
+    }
     if (result.numbers.length) stdout.write(`${result.numbers.join('\n')}\n`);
     return 0;
   } catch (error) {

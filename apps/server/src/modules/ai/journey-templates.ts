@@ -30,7 +30,7 @@ export const JOURNEY_TEMPLATES: JourneyTemplate[] = [
         description: 'Create invoice from completed booking',
         inputMapping: (payload) => ({
           contactId: payload.contactId,
-          items: [{ description: payload.serviceName ?? 'Service', amount: payload.amount ?? 0 }],
+          items: [{ description: payload.serviceName || 'Service', quantity: 1, unitPrice: payload.amount ?? 0 }],
           dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
           notes: `Invoice for booking ${payload.bookingId}`,
         }),
@@ -40,7 +40,7 @@ export const JOURNEY_TEMPLATES: JourneyTemplate[] = [
         toolName: 'crm_update_contact',
         description: 'Update contact status to CLIENT after booking',
         inputMapping: (payload) => ({
-          id: payload.contactId,
+          contactId: payload.contactId,
           status: 'CLIENT',
         }),
       },
@@ -118,12 +118,10 @@ export const JOURNEY_TEMPLATES: JourneyTemplate[] = [
     steps: [
       {
         role: 'finance',
-        toolName: 'commerce_create_invoice',
+        toolName: 'commerce_convert_quote',
         description: 'Convert accepted quote to invoice',
         inputMapping: (payload) => ({
-          contactId: payload.contactId,
           quoteId: payload.quoteId,
-          notes: `Invoice from accepted quote ${payload.quoteId}`,
         }),
       },
       {
@@ -132,7 +130,7 @@ export const JOURNEY_TEMPLATES: JourneyTemplate[] = [
         description: 'Log quote acceptance in CRM',
         inputMapping: (payload) => ({
           contactId: payload.contactId,
-          content: `Quote ${payload.quoteId} accepted on ${new Date().toISOString().split('T')[0]}`,
+          body: `Quote ${payload.quoteId} accepted on ${new Date().toISOString().split('T')[0]}`,
         }),
       },
     ],
@@ -147,12 +145,14 @@ export const JOURNEY_TEMPLATES: JourneyTemplate[] = [
         role: 'finance',
         toolName: 'draft_payment_reminder',
         description: 'Draft payment reminder for overdue invoice',
-        inputMapping: (payload) => ({
-          contactId: payload.contactId,
-          invoiceId: payload.invoiceId,
-          amount: payload.amount,
-          daysOverdue: payload.daysOverdue ?? 7,
-        }),
+        inputMapping: (payload) => {
+          const daysOverdue = payload.daysOverdue ?? 7;
+          const urgency = daysOverdue > 30 ? 'final' : daysOverdue >= 14 ? 'firm' : 'gentle';
+          return {
+            invoiceId: payload.invoiceId,
+            urgency,
+          };
+        },
       },
       {
         role: 'finance',
@@ -162,7 +162,7 @@ export const JOURNEY_TEMPLATES: JourneyTemplate[] = [
           contactId: payload.contactId,
           channel: 'email',
           subject: `Payment Reminder — Invoice ${payload.invoiceNumber ?? payload.invoiceId}`,
-          body: prev[0]?.draft ?? `Your invoice for ${payload.amount} is overdue. Please arrange payment at your earliest convenience.`,
+          body: prev[0]?.body || `Your invoice for ${payload.amount} is overdue. Please arrange payment at your earliest convenience.`,
         }),
       },
       {
@@ -294,7 +294,8 @@ export const JOURNEY_TEMPLATES: JourneyTemplate[] = [
         description: 'Draft follow-up for stale quote',
         inputMapping: (payload) => ({
           contactId: payload.contactId,
-          context: `Quote ${payload.quoteId} has been pending for ${payload.daysStale ?? 7} days`,
+          channel: 'email',
+          tone: 'friendly',
         }),
       },
       {
@@ -305,7 +306,7 @@ export const JOURNEY_TEMPLATES: JourneyTemplate[] = [
           contactId: payload.contactId,
           channel: 'email',
           subject: 'Following up on your quote',
-          body: prev[0]?.draft ?? `Just checking in on the quote we sent you. Let us know if you have any questions!`,
+          body: prev[0]?.body || `Just checking in on the quote we sent you. Let us know if you have any questions!`,
         }),
       },
       {
@@ -334,7 +335,7 @@ export const JOURNEY_TEMPLATES: JourneyTemplate[] = [
           contactId: payload.contactId,
           channel: payload.channel ?? 'email',
           subject: 'Booking Confirmed',
-          body: `Your booking for ${payload.serviceName ?? 'our service'} on ${payload.date ?? 'the scheduled date'} has been confirmed. We look forward to seeing you!`,
+          body: `Your booking for ${payload.serviceName || 'our service'} on ${payload.date ?? 'the scheduled date'} has been confirmed. We look forward to seeing you!`,
         }),
       },
       {
@@ -343,7 +344,7 @@ export const JOURNEY_TEMPLATES: JourneyTemplate[] = [
         description: 'Log booking in CRM',
         inputMapping: (payload) => ({
           contactId: payload.contactId,
-          content: `Booking created: ${payload.serviceName ?? 'Service'} on ${payload.date ?? 'N/A'}`,
+          body: `Booking created: ${payload.serviceName || 'Service'} on ${payload.date ?? 'N/A'}`,
         }),
       },
     ],
@@ -378,11 +379,14 @@ export const JOURNEY_TEMPLATES: JourneyTemplate[] = [
         description: 'Generate weekly content brief',
         condition: (_payload, prev) => {
           const scheduleHealth = prev.find((r) => r.toolName === 'fetch_schedule_health');
-          return !scheduleHealth || scheduleHealth.result?.utilization < 70;
+          const util = scheduleHealth?.result?.utilizationPct;
+          return typeof util !== 'number' || util < 70;
         },
-        inputMapping: () => ({
-          topic: 'Weekly business update and promotions',
-          targetAudience: 'existing customers',
+        inputMapping: (payload) => ({
+          businessId: payload.businessId,
+          targetKeyword: 'weekly business update and promotions',
+          contentType: 'article',
+          notes: 'Target audience: existing customers',
         }),
       },
     ],
