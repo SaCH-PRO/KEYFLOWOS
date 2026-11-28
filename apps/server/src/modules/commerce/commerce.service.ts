@@ -1226,6 +1226,36 @@ export class CommerceService {
     return invoice;
   }
 
+  private static readonly CREDITED_INVOICE_STATUSES: ReadonlySet<string> = new Set([
+    'PARTIALLY_CREDITED',
+    'FULLY_CREDITED',
+  ]);
+
+  /**
+   * FU-LIST-CREDIT-AWARE-REMAINING (Journey H, D-256): single credit-aware
+   * money summary shared by `listInvoices` and `getInvoiceForBusiness`.
+   * Nets own-tenant payments (minus refunds) and own-tenant APPLIED credit
+   * notes in cents, and clamps VOID and FULLY_CREDITED remaining to 0.
+   */
+  private static computeInvoiceMoneySummary(
+    invoice: { total: unknown; status: string; currency?: string | null; payments: readonly Payment[] },
+    credited: number,
+  ) {
+    const balance = creditAwareBalance(
+      balanceOfStoredRows(Number(invoice.total), invoice.payments, invoice.currency),
+      credited,
+    );
+    const remaining =
+      invoice.status === 'VOID' || invoice.status === 'FULLY_CREDITED'
+        ? 0
+        : balance.remaining;
+    return {
+      paidAmount: balance.net,
+      creditedAmount: balance.credited,
+      remaining,
+    };
+  }
+
   /**
    * @param filter.contactId SWEEP-P0-SCOPES (browser sweep BUG-030): only that contact's invoices,
    *   in this business (a contact's Money and Quotes & Invoices tabs); omitted: every invoice.
@@ -1234,7 +1264,7 @@ export class CommerceService {
     page = Math.max(page, 1);
     pageSize = Math.min(Math.max(pageSize, 1), 100);
     const where = { businessId, deletedAt: null, ...(filter.contactId ? { contactId: filter.contactId } : {}) };
-    const [data, total] = await Promise.all([
+    const [rows, total] = await Promise.all([
       this.prisma.client.invoice.findMany({
         where,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -1246,6 +1276,37 @@ export class CommerceService {
       }),
       this.prisma.client.invoice.count({ where }),
     ]);
+
+    const creditedIds = rows
+      .filter((r) => CommerceService.CREDITED_INVOICE_STATUSES.has(r.status))
+      .map((r) => r.id);
+    const creditedByInvoice = new Map<string, number>();
+    if (creditedIds.length > 0) {
+      // FU-LIST-CREDIT-AWARE-REMAINING (D-75 / D-256): one batched own-tenant
+      // APPLIED credit-note sum for credited rows on the page (no N+1).
+      const groups = await this.prisma.client.creditNote.groupBy({
+        by: ['invoiceId'],
+        where: { businessId, invoiceId: { in: creditedIds }, status: 'APPLIED' },
+        _sum: { amount: true },
+      });
+      for (const g of groups) {
+        creditedByInvoice.set(
+          g.invoiceId,
+          fromCents(Math.max(0, toCents(Number(g._sum.amount ?? 0) || 0))),
+        );
+      }
+    }
+
+    const data = rows.map((row) => {
+      const ownPayments = ownTenantPayments(row);
+      const credited = creditedByInvoice.get(row.id) ?? 0;
+      return {
+        ...row,
+        payments: ownPayments,
+        ...CommerceService.computeInvoiceMoneySummary({ ...row, payments: ownPayments }, credited),
+      };
+    });
+
     return { data, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
   }
 
@@ -1664,18 +1725,10 @@ export class CommerceService {
     // (same credit-aware contract as getInvoicePublicView / payment reconcile)
     // and clamp VOID & FULLY_CREDITED remaining to 0.
     const credited = await appliedCreditsOf(this.prisma.client as unknown as Prisma.TransactionClient, invoice);
-    const balance = creditAwareBalance(
-      balanceOfStoredRows(Number(invoice.total), invoice.payments, invoice.currency),
-      credited,
-    );
-    const remaining =
-      invoice.status === 'VOID' || invoice.status === 'FULLY_CREDITED'
-        ? 0
-        : balance.remaining;
+    const summary = CommerceService.computeInvoiceMoneySummary(invoice, credited);
     return {
       ...withLegacySubtotal(invoice),
-      paidAmount: balance.net,
-      remaining,
+      ...summary,
     };
   }
 
