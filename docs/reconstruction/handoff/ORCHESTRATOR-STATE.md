@@ -1,7 +1,7 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-27 ~06:00 UTC by the acting orchestrator (`session_017o9EBfFipLMDKriFTiae7Y`, Claude Code), after
-M38 merged. Main is `c1ea190d`. Rewrite in place on every merge, packet return or owner ruling; never append. What you
+Last written: 2026-11-28 ~01:40 UTC by the acting orchestrator (`session_017o9EBfFipLMDKriFTiae7Y`, Claude Code), after
+M42 merged. Main is `f8ed5984`. Rewrite in place on every merge, packet return or owner ruling; never append. What you
 remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -17,72 +17,47 @@ conversation that produced it. Read `docs/development/agent-memory/README.md` fi
 | How to brief a worker, review a return, build and merge a wave, ask the owner | `docs/development/agent-memory/` |
 | What happened, in order, with evidence | GitHub issue #80 (control room) and git history |
 
-## 0. Current state: the next session starts here (2026-11-27 ~06:00 UTC)
+## 0. Current state: the next session starts here (2026-11-28 ~01:40 UTC)
 
-**Control room moved: issue #273** ("V1 lane coordination thread (continuation of #80)", opened 2026-11-26 23:59 UTC from the owner's account). #80 hit GitHub's 2,500-comment limit and refuses comments (403); it stays the read-only archive of history and rulings. Post with `gh api repos/KEYFLOWOS/KEYFLOWOS/issues/273/comments -F body=@<file>`. Wherever this file, CLAUDE.md or the agent-memory docs say "#80" for posting, read #273; owner question 69 asks whether to update CLAUDE.md and the docs to name it.
+**Control room: issue #273** (continuation of #80, which is full and read-only). Post with `gh api repos/KEYFLOWOS/KEYFLOWOS/issues/273/comments -F body=@<file>`. Wherever this file, CLAUDE.md or the agent-memory docs say "#80" for posting, read #273.
 
 Everything below is on GitHub: this file (branch `wave/v1-docs-p19`), the board (`coord/board`), issues #80 and #273 and the
 pushed `pkt/V1-*` branches. No local branch, worktree, log or agent of this session is needed.
 
-**Orchestrator:** `session_017o9EBfFipLMDKriFTiae7Y`. It took over at ~00:50 UTC from `session_01TnVBvHV3mgiWBWgin4sgAf`,
-which the owner paused (#80 7179133696). Cloud workers report there and post every PACKET REPORT on #80, so a new
-orchestrator reads #80.
+**Orchestrator:** `session_017o9EBfFipLMDKriFTiae7Y` (since 2026-11-27 ~00:50 UTC). An hourly scheduled check
+(`trig_01HUyoEU9w9zzJBNR3t5qFjL`) runs section 0.5 step 7 in this session.
 
-**State:** main `c1ea190d` (M38 #281 merged 05:53 UTC on 2026-11-27; M36 #270 23:17 on 2026-11-26; Antigravity waves M43 to M63 in between). V1-STATUS: 238 of 396 done (62.7% of points; launch 148 of 255).
-Production still runs `f5d58ef7` (16 Nov); the owner redeploys (D-266) with ADMIN_EMAIL and ADMIN_PASSWORD_HASH set
-(D-290).
+**State:** main `f8ed5984` (M42 #285 merged 2026-11-28 ~01:30 UTC; Antigravity's M75, M77, M79 and M81 merged before it). V1-STATUS: 261 of 396 done (68.5% of points). Production still runs `f5d58ef7` (16 Nov). Under D-321 the owner redeploys only after every launch-track packet has merged, with ADMIN_EMAIL and ADMIN_PASSWORD_HASH set (D-290); the owner runs the Q50 query (#273 7228553117) before that.
 
 **Board numbering (D-297):** Claude-lane rows number from P200 up; Antigravity keeps its own sequence below 200. Claude
-waves are even-numbered (M22, M24, ...), Antigravity's odd. Server follow-ups found in Claude reviews become
-antigravity board rows (P202 to P207), announced on #80 (7188549076).
+waves are even-numbered, Antigravity's odd. Server follow-ups found in Claude reviews become Antigravity board rows.
 
 ### 0.1 Waves this session
 
-**Checkpoint 2026-11-27 15:55 UTC. Antigravity merged M67 (#283), so main is now `f9c8966b`. V1-STATUS: 242/396 (63.9%).**
-- The Antigravity lane is back (it was silent from 06:59 to about 14:56 UTC). It has RETURNed P156, P157, P158 and P233. P233 (WEDGE-HIDE-STORE-SERVER) is at `pkt/V1-WEDGE-HIDE-STORE-SERVER` @ `f52537fa`, based on part 1 `207a2513`, and was CONFIRMED twice by that lane's reviewers (#273 7222088726).
-- **Orchestrator decision: re-cut waves.** M40 is held on EXPENSES-HUB-3, which is still in repair rounds and not a launch-track item. So the store gate ships without it, in **wave M42**:
-  - WEDGE-HIDE-STORE part 1 (`207a2513`)
-  - part 2 (`9b2e876c`)
-  - P233 (`f52537fa`)
-  - P232 (`b5bbba5`)
-  - docs
+**Checkpoint 2026-11-28 01:40 UTC: M42 merged (#285, main `f8ed5984`).**
+- M42 = WEDGE-HIDE-STORE parts 1 and 2 (P225) + P233 + P248 (server failsafe, Antigravity) + P232 FU-PORTAL-WEB-OPTIONAL-TOKEN + a B5 journey wait (`69bc3d5a`) + docs. Final head `7f3e7c76`.
+- Proof under D-313 (suites in CI; Release 0 and live journeys locally), re-run after each main merge (M77, M79, M81): Release 0 and release0-live passed at head and base; live B/F/G failed identical steps at head and base (all pre-existing, P247); G5 passed. Phone B5 was a test race (the step navigated before the save finished): 2 of 4 failed before the wait, 5 of 5 passed with it.
+- Confirmations: correctness and security CONFIRMED at `69bc3d5a`; merge-delta correctness and security CONFIRMED at `51b24c01` and at `7f3e7c76` (storefront gate integration 13/13 at each).
+- Follow-ups: P253 FU-STORE-GATE-SIDE-DOORS (server, launch-track).
+- **Main-moves loop:** main moved during three consecutive M42 proofs, each time pushing the wave past the 50-file divergence gate. Fix used: a merge-window request on #273 (7230989545); Antigravity held its enqueue (ACK 00:43 UTC) until M42 merged. Use the same request for the next Claude wave once its proof starts. Tell the server lane the window is open again after each Claude merge.
+- **Speed tracker (D-320), running totals:** M42 took about 10 h from first review to merge (three re-proofs for main moves, about 2.5 h of that). EH3 is at about 30 h and 27 rounds; P231 about 24 h and 13 rounds. Restart losses since 22:33 UTC on 2026-11-27: 0 min (no restart since).
 
-  M40 shrinks to EXPENSES-HUB-3 plus docs, and is rebuilt once EH3 is confirmed twice. Live G (G5 on phone and desktop) is required in the M42 proof.
+**Earlier checkpoints on 2026-11-27** (M38 merged at 05:53 UTC; M40 #284 is held on EH3 and is rebuilt as EH3 plus docs once EH3 is confirmed twice; the re-cut of the store gate into M42 at 15:55 UTC) are in git history and on #273.
 
-**Earlier checkpoint, 13:50 UTC (no merge since M38/M65; main `178ef400`).**
-- M40 (#284) is held. EXPENSES-HUB-3 is at R17 `1eee70b` under two reviews; R16 was CONFIRMED by both. When R17 is confirmed: rebuild M40 with EH3 `1eee70b`, WEDGE part 1 `207a2513` and docs; re-run the proof; correct the #284 body; run two wave confirmations; enqueue.
-- WEDGE-HIDE-STORE part 2 (P225) is at R8 `defc5191` (tests only) under two reviews. It is admitted only with or after P233 and M40.
-- P231 TRUST-BADGES-TRUE-ONLY is at R6 `cc16d7a`. R7 is with worker `session_017o9EBgz5HFUDMDrWzuesH1`: category nouns, mirroring the /book hiding, the full catalog for analysis tools, and two false FAQ answers.
-- P232 is done (`b5bbba5`) and goes into M42.
-- **Owner, 13:4x UTC (typed in `session_017o9EBgPURGAKurygwgEU8p`, Android; #273 7219969638):** "Packets? And yes cintinue work with antigravity". P233 stays an Antigravity row and is not reassigned. The Claude lane follows up with that lane on #273.
-- Orchestrator rulings this session:
-  - EH3 multi-step save: once the first write lands, the rest of that save completes for A, silently on B.
-  - EH3 export: the CSV still downloads after a switch, named after the business.
-  - WEDGE part 2: a transient storefront-read error neither prunes nor offers; only a definite non-true answer prunes.
-  - WEDGE part 2: tests use a 50 ms settle window, never weaker than their round-5 versions.
-
-Earlier waves M22 to M36 (2026-11-26) are in git history and on #80; each merged with two wave confirmations.
-
-- **M38** (#281, merged 2026-11-27 05:53 UTC): P224 SWP-BOOKING-SLOTS (11 repair rounds) + P230 FU-CASE-STUDY-WEB-OPTIONAL-METRICS + docs (D-299 to D-303, the move to #273). Proof at `153e2344`: server 16,926 passed with one load timeout (CRB-CR-1, green alone 10x at head and 3x at base), R0 39/39, web 3,622, mocked e2e 25; live Journey F: **F2 (BUG-122) red→green on both widths**, F9 green at both, the rest fail identically at head and base (other packets: F1 staff, F3 payment methods, F4/F7b/F7c/F7e BUG-048, F6/F7a/F7d BUG-120). The first M38 assembly (54 files) exceeded the 50-file divergence limit and was split; EXPENSES-HUB-3 moved to M40.
-- **Next Claude wave (M40):** P221 EXPENSES-HUB-3 (`7cd3078`, RETURNed after 10 rounds; receipt leg pending P222 under D-299) + P225 WEDGE-HIDE-STORE part 1 (`207a2513`, both lenses CONFIRMED after 2 rounds) + docs (includes the D-299..D-303 timestamp correction).
-- **Container restarts:** after each, `service postgresql start; service redis-server start`; recover finished reviewers' reports from `subagents/agent-<id>.jsonl`. A proof running across a restart does not count. The container restarted at least 4 times on 2026-11-27 by 06:00 UTC.
+- **Container restarts:** after each, `service postgresql start; service redis-server start`; recover finished reviewers' reports from `subagents/agent-<id>.jsonl`. A proof running across a restart does not count; the resumable proof script (done.txt plus `ran:` markers) skips finished steps.
 
 ### 0.2 Claude packets in flight (heads as of this file)
 
 | Packet | Branch @ head | State | Next |
 | --- | --- | --- | --- |
-| **P224 SWP-BOOKING-SLOTS** | merged | M38 | — |
-| **P230 FU-CASE-STUDY-WEB-OPTIONAL-METRICS** | merged | M38 | — |
-| **P221 EXPENSES-HUB-3** | `pkt/V1-EXPENSES-HUB-3` @ `7cd3078` | RETURNed (#273 7208116661); receipt leg is a pending test naming P222 (D-299) | Wave M40 |
-| **P225 WEDGE-HIDE-STORE part 1** | `pkt/V1-WEDGE-HIDE-STORE` @ `207a2513` | `store` hidden module + fail-closed `useLegacyModule` helper; CONFIRMED x2 after rounds 1-2 | Wave M40 |
-| **P225 WEDGE-HIDE-STORE part 2** | `pkt/V1-WEDGE-HIDE-STORE-2` (to claim) | Gate the public store checkout; the anonymous checkout needs a public answer (server lane if a route is needed); consumers must re-render on `refreshWorkspace` | CLAIM with the rule, then build |
-| **P231 TRUST-BADGES-TRUE-ONLY** | `pkt/V1-TRUST-BADGES-TRUE-ONLY` @ `0b1d13f` | Round 1: all but `checkout-flow.tsx` done; checkout items now released (M38 on main) | Checkout RED/FIX, then both reviews |
-| **P232 FU-PORTAL-WEB-OPTIONAL-TOKEN** | `pkt/V1-FU-PORTAL-WEB-OPTIONAL-TOKEN` @ `239a9b9` | Round 2 done (read counter, form tied to business, 2099 fixture); round 2 confirmations running | A later wave |
+| **P225 WEDGE-HIDE-STORE parts 1 and 2, P232, P233** | merged | M42 | — |
+| **P221 EXPENSES-HUB-3** | `pkt/V1-EXPENSES-HUB-3` @ `19da368` | R26 CONFIRMED by both reviews (correctness local, security WEDGE worker); R27 (four MINORs: id-change budget state and read generation, recurring button reset) with the worker | Two reviews of R27; then rebuild M40 (EH3 + docs) |
+| **P231 TRUST-BADGES-TRUE-ONLY** | `pkt/V1-TRUST-BADGES-TRUE-ONLY` @ `daa0830` | R12 CONFIRMED by both; R13 (two MINORs) returned | Two reviews of R13 running (WEDGE worker; local correctness); then a wave |
 
 **Cloud workers** (on the `keyflowos` environment, Opus; at most three at once):
-- `session_017o9EBhDj4SCaLaHVacciEC`: P231 (earlier EXPENSES-HUB-3, P230).
-- `session_017o9EBgz5HFUDMDrWzuesH1`: P232 (earlier SWP-BOOKING-SLOTS).
-- `session_017o9EBgPURGAKurygwgEU8p`: WEDGE-HIDE-STORE part 2. Owner answers D-299 to D-303 were given in this session.
+- `session_017o9EBhDj4SCaLaHVacciEC`: EXPENSES-HUB-3.
+- `session_017o9EBgz5HFUDMDrWzuesH1`: P231.
+- `session_017o9EBgPURGAKurygwgEU8p`: reviewer (WEDGE work merged). Owner answers D-299 to D-303 were given in this session.
 
 ### 0.3 Antigravity (server lane)
 
@@ -237,7 +212,7 @@ Main is at `c1ea190d`. Production runs `f5d58ef7` (16 Nov), far behind main; the
 | --- | --- | --- | --- |
 | **Claude packets** | section 0.2 | Reviews, repairs, two returned | RETURNs, then the next Claude wave |
 | **Antigravity** | their claims on #80 (0.3) | Building and merging (M25 to M31 merged) | Their waves; board rows P202 to P207 |
-| **Owner** | - | - | Section 4 questions 40, 41, 43 to 50, 64, 66 (second half), 68 to 70 and 73; USAGE-COUNT-SCRIPT re-run for NAV-B-HIDE; production redeploy (D-266) with ADMIN_EMAIL and ADMIN_PASSWORD_HASH set (D-290) |
+| **Owner** | - | - | Section 4 question 50 (production data); USAGE-COUNT-SCRIPT re-run for NAV-B-HIDE; production redeploy (D-266) with ADMIN_EMAIL and ADMIN_PASSWORD_HASH set (D-290) |
 | `wave/v1-docs-p19` | main `c1ea190d` merged in | This file and V1-STATUS | Squashed into each Claude wave |
 
 How every proof was run (the server proof at an exact head, the web proof, live journeys and sweeps with the API on
@@ -349,31 +324,16 @@ Questions 32 to 35 were ruled as D-277, D-276, D-278/D-279 and D-275 (section 2)
     out of KEY's automatic prompts unless the owner asks (default: excluded).
 
 **Ruled 2026-11-25 (D-284, D-285):** Timeline paging at launch; form submissions under All.
-40. The contact Timeline never shows an ordinary note's text: `note.created` carries only `{ noteId }` (P41 worker,
-    2026-11-25). Carry the body on the event, or read notes on the Timeline? (Default: not in v1; the Notes tab shows
-    the text.)
-41. P61's security review found an existing race (not in P61's diff): `lib/workspace.ts` refreshAccessToken writes the
-    new token even if the user signed out while the refresh was in flight, which can leave a token on the device.
-    Proposed follow-up FU-REFRESH-AFTER-SIGNOUT (web, S). (Default: follow-on unless you put it on launch.)
 
-43. **Who may edit services, prices and deposits.** The service routes have only AuthGuard and BusinessGuard, so any member, STAFF included, can change prices and deposits. Require bookings or storefront write? (Default: as today until ruled.)
-44. **Push after sign-out.** Signing out leaves the device's push on. Once owner alerts are live, a shared tablet keeps getting the previous owner's payment alerts. Unsubscribe the device on sign-out? (Default: follow-up web packet in handleLogout.)
-45. **Owners of several businesses.** A device's push row holds one business, so an owner of X and Y gets Y's owner alerts by email, not push. One device for all the member's businesses? (Default: email fallback as today.)
-46. **Shell bottom padding (BUG-004 family).** The scroll root's `pb-28` is not effective inside the `h-full` page box, so a phone page's last control can sit under the bottom nav. P62 and the deposit half added local `pb-24 md:pb-0`. Fix the whole shell in one packet? (Default: yes, follow-up web packet.)
-47. **Same mount pattern as the SideSheet fix.** `record-detail-drawer.tsx` and `booking-side-sheet.tsx` have the same pattern, and the shared SideSheet has no focus trap (the commerce sheet does). Follow-up web packets? (Default: yes, follow-on.)
-48. **Deposit journeys.** Journey B2 needs a "New service" dialog in Schedule > Services, and F4 needs the deposit shown at the customer checkout (`/book/<slug>`). Neither is in SWP-SERVICE-DEPOSIT's write set. Which packets own them? (Default: find or add them in the plan.)
 
-49. **Payroll amounts and D-100 (server).** A member with operations read but no revenue read can read payroll gross: the runs list's `totalGross`, and `data.totalGross` on the P59 discard Activity row, which `canReadActivityRow` does not withhold. Treat payroll amounts as money under D-100? (Default: yes; a server follow-up gates them on revenue read.)
 50. **USAGE-COUNT-SCRIPT for SWP-FIN-OVERVIEW-TRUTH.** The plan asks for the count of live businesses with DRAFT or APPROVED payroll runs. That needs production data, so only you can run it. (Default: run it before the production redeploy.)
 
 
 
-64. **Session-storage census approach** (asked; the orchestrator took the stricter default: the resolver proves only a small grammar and everything else fails closed). Overrule if you prefer patching shape by shape or accepting documented gaps.
-68. **Who builds P227 FU-SLOTS-HOURS-READER** (the server slots reader that P224 SWP-BOOKING-SLOTS waits on). Antigravity has since built and returned it (#80 7204856722); confirm that, or reassign. (Default: Antigravity's return stands.)
-70. **Overnight opening hours.** The web pins hours past midnight (18:00-02:00) as real (store-hours MIN-3, CUSTOMER-PAGE-HONESTY); the server's P227 reader rejects close-before-open and falls back to 09:00-17:00, so such a business is shown its hours but offered 09:00-17:00 slots. Support overnight hours (server row P229 teaches the reader), or rule them unsupported (a follow-up then changes the web and MIN-3)? (Default: a recorded divergence until you rule; P229 proposed.)
-73. **Trust claims on the KeyFlowOS homepage.** `apps/web/src/app/page.tsx:176-179` (the platform's own landing page, not a merchant's customer page) shows static "SSL Encrypted", "Secure Payments" and "99.9% Uptime" badges; nothing measures uptime. D-303 covers customer pages. (A) Extend D-303 to the homepage: keep only claims we can show (e.g. "SSL Encrypted" when served over https), drop "99.9% Uptime" and "Secure Payments" unless backed (Recommended); (B) leave the homepage as marketing, outside D-303. (Found by the P231 round 3 security review, #273.)
-69. **Control room successor.** #80 is full (2,500 comments); lanes now post on #273. Update CLAUDE.md, AGENTS.md and the agent-memory docs to name #273 (and a rule for the next rollover), in a docs packet? (Default: yes, in the next Claude docs squash; until then this file says so.)
-66. **Published case studies have no public page** now that /site redirects to /book (second half of the old trust-wording question; the first half is D-303). Add a case-study section to /book, or leave them unpublished at launch? (Default: unpublished.)
+
+**Ruled 2026-11-27 (D-309 to D-312, the orchestrator session):** 43 = D-309 (bookings or store write), 49 = D-310 (payroll is money), 70 = D-311 (overnight hours supported, P229), 66 = D-312 (case studies unpublished).
+
+**Ruled 2026-11-27 (D-307, D-308, #273 7224705459):** 74 = D-307 (2-hour default after a notification; never irreversible), 75 = D-308 (no deferring minors).
 
 **Ruled 2026-11-27 (D-304, D-305, #273 7215057644):** 72 = D-304 (gate the checkout, not the listing), 71 = D-305 (seed a past order in journey G).
 
