@@ -3,6 +3,7 @@ import { ModuleRef } from '@nestjs/core';
 import { isSystemActor } from '../../core/auth/system-actor';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { FlowOrchestratorService } from '../ai/flow-orchestrator.service';
+import { v1ToolRefusalReasonForInvocation } from '../ai/v1-tool-allowlist';
 import type {
   ExecutionOutcome,
   KeyActionExecutorPlugin,
@@ -56,6 +57,10 @@ export class KeyCortexActionExecutorPlugin
     const toolName = payload.toolName;
     if (!toolName) {
       return { success: false, error: 'EXECUTE_TOOL proposal missing payload.toolName' };
+    }
+    const v1Refusal = v1ToolRefusalReasonForInvocation(toolName, payload);
+    if (v1Refusal) {
+      return { success: false, error: v1Refusal };
     }
 
     // `inputPayload` FIRST. PlanExecutorService.createStepProposal writes

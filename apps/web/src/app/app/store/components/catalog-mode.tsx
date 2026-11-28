@@ -1,5 +1,6 @@
 "use client";
 
+import { FaqPlaceholderWarning } from "./faq-placeholder-warning";
 import { motion } from "framer-motion";
 import { Package, ShoppingBag, Briefcase, Clock, CheckCircle2, Eye } from "lucide-react";
 import { WorkspaceMetricStrip, type MetricStripItem } from "@/components/ui/workspace-metric-strip";
@@ -7,7 +8,7 @@ import { AiRecommendationCard } from "@/components/ui/ai-recommendation-card";
 import { CatalogManager } from "./catalog-manager";
 import { HoursEditor, type BusinessHoursMap } from "./hours-editor";
 import { AccordionGroup, AccordionSection } from "./accordion-section";
-import type { Product, Service, CatalogItemOverride } from "@/lib/client";
+import type { Product, Service, CatalogItemOverride, FaqEntry } from "@/lib/client";
 
 type Props = {
   commerceProducts: Product[];
@@ -32,6 +33,8 @@ type Props = {
   onItemOverrideChange?: (productId: string, override: Partial<CatalogItemOverride>) => void;
   categoryEmphasis?: Record<string, "high" | "medium" | "low" | "default">;
   onCategoryEmphasisChange?: (category: string, emphasis: "high" | "medium" | "low" | "default") => void;
+  /** P231 r9: the storefront's FAQ entries: reordering products saves the whole storefront config, these included. */
+  faqEntries?: FaqEntry[];
 };
 
 export function CatalogMode({
@@ -57,6 +60,7 @@ export function CatalogMode({
   onItemOverrideChange,
   categoryEmphasis,
   onCategoryEmphasisChange,
+  faqEntries,
 }: Props) {
   const totalItems = commerceProducts.length;
   const inStore = storeItemCount;
@@ -113,6 +117,8 @@ export function CatalogMode({
 
   return (
     <div className="space-y-4">
+      {/* P231 r9: reordering products (handleReorderProducts) writes the whole storefront config, FAQ entries included. */}
+      <FaqPlaceholderWarning entries={faqEntries} where="elsewhere" saves="reordering products here saves" />
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
         <WorkspaceMetricStrip items={metrics} columns={4} compact />
       </motion.div>

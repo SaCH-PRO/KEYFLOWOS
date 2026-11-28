@@ -106,6 +106,9 @@ export function useStoreData() {
   const [readiness, setReadiness] = useState<StoreReadinessResult | null>(null);
 
   const [storefrontConfig, setStorefrontConfig] = useState<StorefrontConfig>(emptyStorefront);
+  // P231 r11 (D-303): whether this business's storefront config was read (until it is, or when the read fails, the
+  // config is emptyStorefront, and what it hides from the store is not known).
+  const [storefrontConfigRead, setStorefrontConfigRead] = useState(false);
   const [configSaving, setConfigSaving] = useState(false);
   const [landed, setLanded] = useState<Landed | null>(null);
 
@@ -148,6 +151,7 @@ export function useStoreData() {
     setCommerceProducts([]);
     setBusinessData(null);
     setStoreGraph(null);
+    setStorefrontConfigRead(false);
     setDriftedItems([]);
     setReadiness(null);
     setOverviewAnalytics(null);
@@ -285,7 +289,10 @@ export function useStoreData() {
       ]);
       if (stale()) return;
       setLoadGeneration((g) => g + 1);
-      if (configRes.data) setStorefrontConfig(configRes.data);
+      if (configRes.data) {
+        setStorefrontConfig(configRes.data);
+        setStorefrontConfigRead(true);
+      }
       if (analyticsRes.data) setOverviewAnalytics(analyticsRes.data);
       if (deliveryRes.data) {
         const count = Object.values(deliveryRes.data).filter((m) => m?.enabled).length;
@@ -731,6 +738,7 @@ export function useStoreData() {
     syncing,
     overviewAnalytics,
     storefrontConfig,
+    storefrontConfigRead,
     configSaving,
     loadData,
     getPublicBookingUrl,

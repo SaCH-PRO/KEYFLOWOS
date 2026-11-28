@@ -261,11 +261,18 @@ describe('V1-21b review 7 ENV-FORGE — a member cannot supply a position envelo
     };
     const plain = await run(false);
     const forged = await run(true);
-    expect(forged.decisions.map((d) => d.envelope), 'evaluate is given no client envelope').toEqual([undefined]);
     expect(forged.menus, 'the tool menu is built without it').toEqual([undefined]);
     expect(forged.decisions).toEqual(plain.decisions);
     expect(forged.reply).toBe(plain.reply);
     expect(forged.executed).toEqual(plain.executed);
+    if (tool === 'execute_custom_logic') {
+      // KEY-TOOL-ALLOWLIST (V1-63, D-318 Option 1): execute_custom_logic is unconditionally refused in v1 before governance.evaluate
+      expect(forged.decisions).toEqual([]);
+      expect(forged.executed).toEqual([]);
+      expect(forged.reply).toBe('This action is blocked: not available in this version');
+      return;
+    }
+    expect(forged.decisions.map((d) => d.envelope), 'evaluate is given no client envelope').toEqual([undefined]);
     expect(forged.decisions[0]).toMatchObject({ tool, crew: ['general'] });
     if (GENERAL_REFUSES.includes(tool)) {
       // DRV5-3's repro: the general crew refuses it, and the forged envelope no longer turns that into allowed
@@ -298,10 +305,16 @@ describe('V1-21b review 7 ENV-FORGE — a member cannot supply a position envelo
       const forged = await run(true);
       expect(forged.role, `${tool}: the client's role is not passed`).toBeUndefined();
       expect(forged.menus, tool).toEqual([undefined]);
-      expect(forged.decisions.map((d) => d.envelope), tool).toEqual([undefined]);
       expect(forged.decisions, tool).toEqual(plain.decisions);
       expect(forged.chunks, tool).toEqual(plain.chunks);
       expect(forged.executed, tool).toEqual(plain.executed);
+      if (tool === 'execute_custom_logic') {
+        expect(forged.decisions, tool).toEqual([]);
+        expect(forged.executed, tool).toEqual([]);
+        expect(forged.chunks.join('')).toContain('not available in this version');
+        continue;
+      }
+      expect(forged.decisions.map((d) => d.envelope), tool).toEqual([undefined]);
       // "go ahead" staffs the marketing crew, which grants none of the probes
       expect(forged.decisions[0], tool).toMatchObject({ tool, crew: ['marketing'], allowed: false });
     }
@@ -313,9 +326,9 @@ describe('V1-21b review 7 ENV-FORGE — a member cannot supply a position envelo
     expect(turn.decisions).toMatchObject([{ tool: 'crm_delete_contact', envelope: undefined, allowed: false }]);
     expect(turn.menus).toEqual([undefined]);
 
-    const streamed = makeTurn({ toolCall: 'execute_custom_logic' });
+    const streamed = makeTurn({ toolCall: 'crm_delete_contact' });
     for await (const _chunk of streamed.orchestrator.streamChat(BIZ, 'go ahead', [], { route: '/app', jobRoleEnvelope: FORGED } as any)) void _chunk;
-    expect(streamed.decisions).toMatchObject([{ tool: 'execute_custom_logic', envelope: undefined, allowed: false }]);
+    expect(streamed.decisions).toMatchObject([{ tool: 'crm_delete_contact', envelope: undefined, allowed: false }]);
     expect(streamed.menus).toEqual([undefined]);
     expect(streamed.executed).toEqual([]);
   });

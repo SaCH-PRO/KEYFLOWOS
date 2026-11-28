@@ -3,6 +3,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
 import { AiMemoryService } from './ai-memory.service';
 import { getToolByName } from './flow-tool-registry';
+import { v1ToolRefusalReason, v1ToolRefusalReasonForInvocation } from './v1-tool-allowlist';
 import { RoleEngineService, BusinessRole } from './role-engine.service';
 // W6-LOG-ADDRESSES-AND-DOCS repair (9B-D2, review SEC-W6LOG-1): redactContactDetails
 // redacts addresses (the shared redactAddresses) and phone-shaped numbers.
@@ -305,6 +306,18 @@ export class AiOversightService {
     toolName: string,
     opts?: { confidence?: number; timeoutHours?: number; role?: BusinessRole; planStepId?: string },
   ): Promise<GovernanceDecision & { autoApproved: boolean }> {
+    const v1Refusal = v1ToolRefusalReason(toolName);
+    if (v1Refusal) {
+      return {
+        allowed: false,
+        autoApproved: false,
+        requiresQuickConfirm: false,
+        requiresFormalApproval: false,
+        requiresAdminApproval: false,
+        tier: this.getToolTier(toolName),
+        reason: v1Refusal,
+      };
+    }
     const decision = await this.evaluate(businessId, toolName, undefined, opts?.role);
     if (!decision.allowed) return { ...decision, autoApproved: false };
 
@@ -514,6 +527,10 @@ export class AiOversightService {
     planStepId?: string;
     module?: string;
   }) {
+    const v1Refusal = v1ToolRefusalReasonForInvocation(data.toolName, data.inputPayload);
+    if (v1Refusal) {
+      throw new ForbiddenException(v1Refusal);
+    }
     const tier = this.getToolTier(data.toolName);
     const module = data.module || this.inferModule(data.toolName);
     const item = await this.prisma.client.aiApprovalItem.create({

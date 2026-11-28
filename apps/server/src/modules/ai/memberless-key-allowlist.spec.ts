@@ -230,10 +230,11 @@ describe('MKA-02/03: every memberless surface is refused a money write and a Boo
   it.each(MEMBERLESS)('MKA-02 RED-BEFORE: %s — executeToolDirectly refuses every money write, Books read and other tool off the list; no service is called', async (_label, action) => {
     const { orchestrator, writes, reads, rec } = orchestratorFor();
     for (const [tool, args] of [...MONEY_WRITES, ...BOOKS_READS, ...OTHER_OFF_LIST]) {
+      const expected = tool === 'payroll_mark_paid' ? /not available in this version/ : REFUSED;
       await expect(
         orchestrator.executeToolDirectly(BIZ, tool, { ...args }, undefined, action ? { ...action } : undefined),
         tool,
-      ).rejects.toThrow(REFUSED);
+      ).rejects.toThrow(expected);
     }
     expect(writes()).toBe(0);
     expect(reads()).toBe(0);
@@ -243,7 +244,8 @@ describe('MKA-02/03: every memberless surface is refused a money write and a Boo
   it.each(MEMBERLESS)('MKA-03 RED-BEFORE: %s — executeToolByName (the phone stream\'s and an inner call\'s door) refuses them too', async (_label, action) => {
     const { orchestrator, writes, reads } = orchestratorFor();
     for (const [tool, args] of [...MONEY_WRITES, ...BOOKS_READS]) {
-      await expect(orchestrator.executeToolByName(BIZ, tool, { ...args }, action ? { ...action } : undefined), tool).rejects.toThrow(REFUSED);
+      const expected = tool === 'payroll_mark_paid' ? /not available in this version/ : REFUSED;
+      await expect(orchestrator.executeToolByName(BIZ, tool, { ...args }, action ? { ...action } : undefined), tool).rejects.toThrow(expected);
     }
     expect(writes()).toBe(0);
     expect(reads()).toBe(0);
