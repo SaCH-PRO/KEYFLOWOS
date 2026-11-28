@@ -1745,6 +1745,11 @@
       "prefix": "v92o_",
       "owner": "apps/server/test/service-write-scope.integration.test.ts",
       "packet": "V1-92 (P234 FU-SERVICE-WRITE-SCOPE, D-317)"
+    },
+    {
+      "prefix": "v92p_",
+      "owner": "apps/server/test/store-gate-side-doors.integration.test.ts",
+      "packet": "V1-92 (P253 FU-STORE-GATE-SIDE-DOORS, D-297)"
     }
   ],
   "pendingRenames": [],
