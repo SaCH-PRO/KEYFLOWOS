@@ -196,19 +196,21 @@ const hasContent = (t: string | undefined) => t !== undefined && (/[^\s\p{P}\p{S
 /** Punctuation or symbols only, and no emoji: what may be dropped at the cut. */
 const isMark = (g: string | undefined) => g !== undefined && /^[\p{P}\p{S}]+$/u.test(g) && !isEmoji(g);
 /**
- * r15 (R15-2): sentence punctuation, ASCII, CJK and full-width (\p{Sentence_Terminal}: . ! ? … 。 ！ ？ ．; and the
- * commas, colons, semicolons), dashes, opening brackets and quotes: always dropped at the cut.
+ * r15-r16 (R15-2, R16-5): sentence punctuation, ASCII, CJK and full-width (\p{Sentence_Terminal}: . ! ? 。 ！ ？ ．;
+ * the commas, colons, semicolons; and "…", which is not \p{Sentence_Terminal}, so it is listed), dashes, opening
+ * brackets and quotes: always dropped at the cut.
  */
 const ALWAYS_DROPPED = /^(?:[,;:…、，､：；﹐﹑﹔﹕]|\p{Sentence_Terminal}|\p{Pd}|\p{Ps}|\p{Pi})$/u;
 
 /**
- * P231 r12-r15: the graphemes dropped from the end of the kept part, before the "..." (one grapheme at a time, so an
+ * P231 r12-r16: the graphemes dropped from the end of the kept part, before the "..." (one grapheme at a time, so an
  * emoji with a skin tone, a keycap, a flag, a family is never split):
  * - always: whitespace and ALWAYS_DROPPED;
  * - any other punctuation or symbol ("&", "•", "/", "*", "#", "@", "¿", "<", "$", "©", "↔") only when its run of
  *   punctuation and symbols stands alone, after whitespace or nothing ("Shop &", "Shop &&", "4.5 /"); a run attached
  *   to the letter, digit, mark or emoji before it is that word's and stays whole ("C##", "4★★", "Free**", "a/b/",
- *   "Pepper™", R15-1); a currency sign after a number and one space is the number's too ("5 €");
+ *   "Pepper™", R15-1); a run after sentence punctuation is lone (R16-3: "Shop.★" gives "Shop"); a run of currency
+ *   signs after a number and one space is the number's too ("5 €", "5 €€": R16-4, decided for the whole run);
  * - never: a "%", a "+", a closing bracket or quote, a straight quote (it may close one), an emoji, or a grapheme
  *   holding anything else (a letter, a digit, a mark), alone or not (R15-4: "50 %...", "1 +...", "( weekdays )...":
  *   a closing mark closes what the kept part opened, and dropping it would leave that open).
@@ -224,10 +226,14 @@ function dropTrailing(g: string[]): string[] {
     if (!isMark(c)) break;
     if (/^[%+"'\p{Pe}\p{Pf}]/u.test(c)) break;
     if (!ALWAYS_DROPPED.test(c)) {
+      // The run this grapheme ends: the marks before it, back to content, whitespace, the start, or (r16, R16-3)
+      // sentence punctuation, which is no word: a symbol after it is lone, and goes with it ("Hello!!&" gives
+      // "Hello"). The run is decided whole, here, before any of it goes (R16-4): it stays whole or goes whole.
       let k = end - 1;
-      while (k > 0 && isMark(g[k - 1])) k--;
+      while (k > 0 && isMark(g[k - 1]) && !ALWAYS_DROPPED.test(g[k - 1])) k--;
       if (hasContent(g[k - 1])) break;
-      if (/^\p{Sc}$/u.test(c) && k === end - 1 && isSpace(g[k - 1]) && /^\p{Nd}$/u.test(g[k - 2] ?? "")) break;
+      const currency = g.slice(k, end).every((r) => /^\p{Sc}$/u.test(r));
+      if (currency && isSpace(g[k - 1]) && /^\p{Nd}$/u.test(g[k - 2] ?? "")) break;
     }
     end--;
   }
