@@ -165,6 +165,17 @@ describe("R19 addendum: near-linear time, more lone shapes, '…'", () => {
       expect(ms, `${t.slice(0, 30)} @${max}`).toBeLessThan(50);
     }
   });
+  it("the cut right after a long run (the review's widths fit whole or cut inside the run), in under 50 ms", () => {
+    // At width run + 9 the room ends just past the run's trailing space, so the kept part is "Shop " + the run, and
+    // dropTrailing walks all of it: 6,000 stars take a few ms; re-skipping the marker run per marker took ~70 ms at 3,000.
+    for (const run of ["*".repeat(6000), "*•".repeat(3000), "*&".repeat(3000), "!*".repeat(3000)]) {
+      const t = `Shop ${run} xyz more`;
+      timed(t, run.length + 9);
+      const { out, ms } = timed(t, run.length + 9);
+      expect(out, run.slice(0, 4)).toBe("Shop...");
+      expect(ms, run.slice(0, 4)).toBeLessThan(50);
+    }
+  });
   it("fuzz: long mark-heavy inputs (alternating runs, the fallback), worst under 10 ms", () => {
     const RUNS = ["*", "*•", "*!", "*&", "†.", "*(", "€*", "!*", " *", "**x"];
     let seed = 0x3121;
