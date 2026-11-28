@@ -330,12 +330,12 @@ afterAll(async () => {
 }, 60_000);
 
 describe('V1-66 SWP-FIN-LEDGER: the General Ledger end date covers its whole day', () => {
-  it('GLD-01: from=D&to=D answers the 18 lines of the day', async () => {
+  it('GLD-01: from=D&to=D answers the 12 lines of the business day (FU-LEDGER-ZONED-FROM: D-1 20:00 local midnight UTC excluded)', async () => {
     const res = await ledger(ID.bizA, { from: D, to: D });
     expect(res.status).toBe(200);
-    expect(res.body.total).toBe(18);
-    expect(res.body.rows).toHaveLength(18);
-    expect(labels(res.body)).toEqual(twice(A_MIDNIGHT, A_DAY));
+    expect(res.body.total).toBe(12);
+    expect(res.body.rows).toHaveLength(12);
+    expect(labels(res.body)).toEqual(twice(A_DAY));
   });
 
   it('GLD-02: to=D alone answers everything up to the end of the business day, and nothing of the next', async () => {
@@ -347,45 +347,46 @@ describe('V1-66 SWP-FIN-LEDGER: the General Ledger end date covers its whole day
   });
 
   it('GLD-03: a timestamp end keeps <= and is not widened to a day', async () => {
+    const UTC_MIDNIGHT = '2026-03-10T00:00:00.000Z';
     // The line dated exactly the end instant is in; later lines are out.
-    const atNoon = await ledger(ID.bizA, { from: D, to: '2026-03-10T13:00:00.000Z' });
+    const atNoon = await ledger(ID.bizA, { from: UTC_MIDNIGHT, to: '2026-03-10T13:00:00.000Z' });
     expect(atNoon.status).toBe(200);
     expect(labels(atNoon.body)).toEqual(twice(A_MIDNIGHT, { 'local-start': '', morning: '', 'noon-usd': '' }));
 
-    const justBeforeNoon = await ledger(ID.bizA, { from: D, to: '2026-03-10T12:59:59.999Z' });
+    const justBeforeNoon = await ledger(ID.bizA, { from: UTC_MIDNIGHT, to: '2026-03-10T12:59:59.999Z' });
     expect(labels(justBeforeNoon.body)).toEqual(twice(A_MIDNIGHT, { 'local-start': '', morning: '' }));
 
     // Midnight written as a timestamp means midnight.
-    const midnight = await ledger(ID.bizA, { from: D, to: '2026-03-10T00:00:00.000Z' });
+    const midnight = await ledger(ID.bizA, { from: UTC_MIDNIGHT, to: '2026-03-10T00:00:00.000Z' });
     expect(midnight.status).toBe(200);
     expect(midnight.body.total).toBe(6);
     expect(labels(midnight.body)).toEqual(twice(A_MIDNIGHT));
 
     // An offset timestamp is the instant it names: 09:30 at UTC-4 is 13:30Z.
-    const offset = await ledger(ID.bizA, { from: D, to: '2026-03-10T09:30:00-04:00' });
+    const offset = await ledger(ID.bizA, { from: UTC_MIDNIGHT, to: '2026-03-10T09:30:00-04:00' });
     expect(offset.status).toBe(200);
     expect(labels(offset.body)).toEqual(twice(A_MIDNIGHT, { 'local-start': '', morning: '', 'noon-usd': '' }));
   });
 
-  it('GLD-04: pageSize is honoured across the whole day', async () => {
+  it('GLD-04: pageSize is honoured across the whole business day', async () => {
     const seen = new Set<string>();
     const sizes: number[] = [];
-    for (const page of [1, 2, 3, 4]) {
+    for (const page of [1, 2, 3]) {
       const res = await ledger(ID.bizA, { from: D, to: D, pageSize: 5, page });
       expect(res.status).toBe(200);
-      expect(res.body).toMatchObject({ total: 18, page, pageSize: 5 });
+      expect(res.body).toMatchObject({ total: 12, page, pageSize: 5 });
       sizes.push(res.body.rows.length);
       for (const row of res.body.rows) seen.add(row.entryId);
     }
-    expect(sizes).toEqual([5, 5, 5, 3]);
-    expect(seen.size).toBe(18);
+    expect(sizes).toEqual([5, 5, 2]);
+    expect(seen.size).toBe(12);
 
     // No pageSize: the default page (100) holds the day.
     const whole = await ledger(ID.bizA, { from: D, to: D });
-    expect(whole.body).toMatchObject({ total: 18, page: 1, pageSize: 100 });
+    expect(whole.body).toMatchObject({ total: 12, page: 1, pageSize: 100 });
     // `limit` is not a parameter of this route: it does not page.
     const limited = await ledger(ID.bizA, { from: D, to: D, limit: 5 });
-    expect(limited.body.rows).toHaveLength(18);
+    expect(limited.body.rows).toHaveLength(12);
     expect(limited.body.pageSize).toBe(100);
   });
 
