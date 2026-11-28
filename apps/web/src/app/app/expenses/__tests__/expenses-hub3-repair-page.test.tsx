@@ -243,7 +243,8 @@ describe("SEC-EXH3-1: a business switch with the Expenses page open", () => {
     render(<ExpensesInboxPage />);
     await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled());
     afterRequest();
-    fireEvent.click(screen.getByRole("button", { name: /^add expense$/i }));
+    // P265: the button is offered once the read has answered ok, so it is waited for, not looked up at once.
+    fireEvent.click(await screen.findByRole("button", { name: /^add expense$/i }, { timeout: 10000 }));
     expect(await screen.findByRole("dialog", {}, { timeout: 10000 })).toBeTruthy();
     switchTo("biz_B");
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull(), { timeout: 10000 });
@@ -298,7 +299,8 @@ async function categoriesInventNoTrend() {
   render(<ExpensesInboxPage />);
   await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled());
   afterRequest();
-  fireEvent.click(screen.getByRole("tab", { name: "Categories" }));
+  // P265 R1-1: the tabs are rendered once the expenses read has answered ok, so the tab is waited for.
+  fireEvent.click(await screen.findByRole("tab", { name: "Categories" }, { timeout: 10000 }));
   await waitFor(() => expect(text()).toMatch(/fuel/i));
   expect(text()).not.toMatch(/spike/i);
   expect(text()).not.toMatch(/\+100%/);
@@ -357,7 +359,8 @@ async function recurringOpensOnce() {
   render(<ExpensesInboxPage />);
   await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled());
   afterRequest();
-  fireEvent.click(screen.getByRole("tab", { name: "Recurring" }));
+  // P265 R1-2: the same for the Recurring tab.
+  fireEvent.click(await screen.findByRole("tab", { name: "Recurring" }, { timeout: 10000 }));
   // R26-6: the button is offered once the Recurring list's read has answered, so it is awaited.
   fireEvent.click(await screen.findByRole("button", { name: /new recurring expense/i }));
   expect(await screen.findByRole("dialog")).toBeTruthy();
