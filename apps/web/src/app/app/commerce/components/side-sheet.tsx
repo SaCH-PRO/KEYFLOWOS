@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useLayoutEffect, useRef, useCallback, useState, useSyncExternalStore, type ReactNode } from "react";
+import { Component, useEffect, useId, useLayoutEffect, useRef, useCallback, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
@@ -19,17 +19,75 @@ function selectionOf(el: Element): [number, number] | null {
   }
 }
 /**
- * The control in the new shell that stands for one in the old shell (the header's Close, a footer button): the same
- * tag with the same accessible label and text, when exactly one matches. The children are never matched this way:
- * they are the same nodes (P263 R3). Only a control that was in the shell when it was focused is looked up (P273-1):
- * a child removed before the flip is not stood in for by a shell control with its label.
+ * The control in the new shell that stands for one in the old shell (the header's Close): the same tag with the same
+ * accessible label and text, when exactly one matches. The children and the footer are never matched this way: they
+ * are the same nodes (P263 R3, R5 P274-2). Only a control that was in the shell when it was focused is looked up
+ * (P273-1): a child removed before the flip is not stood in for by a shell control with its label.
  */
-function shellCounterpart(old: HTMLElement, panel: HTMLElement, content: HTMLElement): HTMLElement | null {
+function shellCounterpart(old: HTMLElement, panel: HTMLElement, kept: Array<HTMLElement | null>): HTMLElement | null {
   const same = Array.from(panel.querySelectorAll<HTMLElement>(old.tagName)).filter(
-    (el) => !content.contains(el) && el.getAttribute("aria-label") === old.getAttribute("aria-label") && el.textContent === old.textContent,
+    (el) => !kept.some((k) => k?.contains(el)) && el.getAttribute("aria-label") === old.getAttribute("aria-label") && el.textContent === old.textContent,
   );
   return same.length === 1 ? same[0] : null;
 }
+/**
+ * Swallows the given focus events aimed at `target` for as long as it is held: listened for on window, in the capture
+ * phase, so neither the target's own listeners nor React's see them. Returns the release.
+ */
+function swallowFocusEvents(target: HTMLElement, types: readonly string[]): () => void {
+  const stop = (e: Event) => { if (e.target === target) e.stopImmediatePropagation(); };
+  for (const t of types) window.addEventListener(t, stop, true);
+  return () => { for (const t of types) window.removeEventListener(t, stop, true); };
+}
+const BLUR_EVENTS = ["blur", "focusout"] as const;
+const FOCUS_EVENTS = ["focus", "focusin"] as const;
+
+/**
+ * P274-4: the overlays of the sheets that are open (SideSheet and QuickSheet). Escape closes only the topmost: the
+ * last in document order, which is the one painted on top (a sheet opened inside another's children comes after it).
+ */
+const openOverlays = new Set<HTMLElement>();
+function isTopmost(overlay: HTMLElement): boolean {
+  for (const other of openOverlays) {
+    if (other !== overlay && overlay.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING) return false;
+  }
+  return true;
+}
+function useTopmostEscape(open: boolean, overlayRef: { current: HTMLElement | null }, close: () => void) {
+  useEffect(() => {
+    if (!open) return;
+    const overlay = overlayRef.current;
+    if (overlay) openOverlays.add(overlay);
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && overlay && isTopmost(overlay)) close();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      if (overlay) openOverlays.delete(overlay);
+    };
+  }, [open, overlayRef, close]);
+}
+
+/**
+ * Commit-phase hooks of an open sheet, rendered first in its overlay. `onOpen` runs when the overlay mounts, before
+ * the children's own layout work (autoFocus): what had focus then is the opener (P274-3). `onBeforeSwap` runs in the
+ * commit that swaps the shell for a new layout, before anything is removed (P274-1): React removes the old shell in
+ * that commit, and Chromium fires blur on a focused child as it goes.
+ */
+class SheetCommitHooks extends Component<{ layout: string; onOpen: () => void; onBeforeSwap: () => void }> {
+  componentDidMount() { this.props.onOpen(); }
+  getSnapshotBeforeUpdate(prev: Readonly<{ layout: string }>) {
+    if (prev.layout !== this.props.layout) this.props.onBeforeSwap();
+    return null;
+  }
+  componentDidUpdate() {}
+  render() { return null; }
+}
+
+/** The click-stop wrapper of a portaled part: it stops clicks at the sheet, and has no box of its own (P274-6). */
+const stopClick = (e: { stopPropagation: () => void }) => e.stopPropagation();
+const CONTENTS = { display: "contents" } as const;
 
 interface SideSheetProps {
   open: boolean;
@@ -66,11 +124,12 @@ export function SideSheet({
 }: SideSheetProps) {
   const isMobile = useIsMobile();
   const panelRef = useRef<HTMLDivElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   // P273-2: the sheet's own id, so two open sheets with the same title are each labelled by their own heading.
   const titleId = `sidesheet-title-${useId()}`;
 
-  // P257 R1-1: onClose and closeDisabled are read through refs, so the focus and keydown effect below depends on
+  // P257 R1-1: onClose and closeDisabled are read through refs, so the focus and keydown effects below depend on
   // `open` only. A caller passing a new onClose each render (an inline arrow; the expense sheet re-rendering as it is
   // typed in) or toggling closeDisabled re-ran that effect on every render: its cleanup focused the opener and the
   // rerun focused the panel, so focus left the field after every keystroke.
@@ -86,50 +145,78 @@ export function SideSheet({
     if (!closeDisabledRef.current) onCloseRef.current();
   }, []);
 
+  // P274-4: Escape closes this sheet only when it is the topmost open one.
+  useTopmostEscape(open, overlayRef, close);
+
+  // P274-3: the opener is what had focus when the overlay mounted (SheetCommitHooks' onOpen), before a child's
+  // autoFocus took it. The open frame focuses the panel only if focus is not already in it (a child's autoFocus is
+  // kept), and a sheet closed before that frame does not take focus in it. Closing returns focus to the opener.
+  const rememberOpener = useCallback(() => {
+    previousFocusRef.current = document.activeElement as HTMLElement | null;
+  }, []);
   useEffect(() => {
     if (!open) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    };
-    previousFocusRef.current = document.activeElement as HTMLElement;
-    document.addEventListener("keydown", handleKeyDown);
-    requestAnimationFrame(() => panelRef.current?.focus());
+    if (!previousFocusRef.current) previousFocusRef.current = document.activeElement as HTMLElement | null; // reopened mid-exit
+    const frame = requestAnimationFrame(() => {
+      const panel = panelRef.current;
+      if (panel && !panel.contains(document.activeElement)) panel.focus();
+    });
     return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      previousFocusRef.current?.focus();
+      cancelAnimationFrame(frame);
+      const back = previousFocusRef.current;
+      previousFocusRef.current = null;
+      back?.focus();
     };
-  }, [open, close]);
+  }, [open]);
 
   // P263 R3: the panel is keyed by the layout, so a resize or rotation while open remounts the shell (the phone bottom
-  // sheet or the desktop panel). The children do not remount with it: they render once, through a portal, into a
-  // container this sheet owns, and the container is moved into the current shell's content slot. On a flip the same
-  // nodes, with their focus target, caret, typed values and component state, are carried over. Moving a focused node
-  // drops its focus, so the node focused before the flip is focused again (exactly that node; no matching), and its
-  // caret and selection are put back. A control in the shell itself (the header's Close, a footer button) is
-  // focused in the new shell when one stands for it, otherwise the panel is. Focus outside the sheet is left alone.
-  // The container is made once, on the client only (the server has no document). The portal sits inside the overlay,
-  // after the keyed panel: the overlay is not remounted by a flip, so in the React tree the children stay under the
-  // sheet (R4): they read the sheet's own presence (a child's exit runs when the sheet closes; a caller's
-  // AnimatePresence is not held by them), and their clicks stop at the sheet as the panel's do. The slot's ref puts the
+  // sheet or the desktop panel). The children and (R5 P274-2) the footer do not remount with it: each renders once,
+  // through a portal, into a container this sheet owns, and the container is moved into the current shell's slot. On
+  // a flip the same nodes, with their focus target, caret, typed values and component state, are carried over.
+  // Removing the old shell drops the focus of a node in it, so the node focused before the flip is focused again
+  // (exactly that node; no matching), and its caret and selection are put back. P274-1: the flip is not a blur: the
+  // blur that removal fires (Chromium) and the focus that the refocus fires are swallowed, so neither the node's own
+  // listeners nor React's onBlur and onFocus see them (a child's popover that closes on blur stays open). If the node
+  // cannot be focused again (it became disabled), it is told that it lost focus. The header's Close is focused in the
+  // new shell when one stands for it (P273-1: only if it was the shell's when it was focused), otherwise the panel
+  // is. Focus outside the sheet is left alone.
+  // The containers are made once, on the client only (the server has no document). The portals sit inside the
+  // overlay, after the keyed panel: the overlay is not remounted by a flip, so in the React tree the children stay
+  // under the sheet (R4): they read the sheet's own presence (a child's exit runs when the sheet closes; a caller's
+  // AnimatePresence is not held by them), and their clicks stop at the sheet as the panel's do. A slot's ref puts its
   // container in place before the children's own layout effects run, so a child that measures itself, or autoFocus,
-  // finds itself in the document on mount. The portal is rendered only once mounted on the client: a sheet rendered
-  // open on the server has an empty slot there, and hydrates to the same before the children are put in (R4-3).
+  // finds itself in the document on mount. The portals are rendered only once mounted on the client: a sheet rendered
+  // open on the server has empty slots there, and hydrates to the same before the children are put in (R4-3).
+  // P274-5: once the sheet has closed (its exit done) or unmounted, the containers are taken out of the old shell, so
+  // nothing of it stays reachable from them. A sheet reopened during its exit is not reported as exit-complete
+  // (framer-motion cancels that exit; pinned by R3's "reopened while it is still animating out").
   const [content] = useState<HTMLDivElement | null>(() => (typeof document === "undefined" ? null : document.createElement("div")));
+  const [footerContent] = useState<HTMLDivElement | null>(() => (typeof document === "undefined" ? null : document.createElement("div")));
   const mounted = useSyncExternalStore(subscribeNothing, () => true, () => false);
   /**
-   * Set when the container moved into a new slot: what had focus then (the old shell is already gone), whether it was
-   * a control of the shell itself when it was focused, and its caret.
+   * Set before the shell is swapped: what had focus (the old shell is still in place), whether it was a control of the
+   * shell itself when it was focused, whether it had focus at that moment (so its removal blur is swallowed), its
+   * caret, and the release of that swallowing.
    */
-  const movedRef = useRef<{ last: HTMLElement | null; inShell: boolean; selection: [number, number] | null } | null>(null);
+  const movedRef = useRef<{
+    last: HTMLElement | null;
+    inShell: boolean;
+    hadFocus: boolean;
+    selection: [number, number] | null;
+    release: () => void;
+  } | null>(null);
   // R2-4: a focus change only records the focused node (O(1)); nothing is read from the panel until a flip. P273-1:
-  // and whether it is the shell's own control (in the panel, not among the children), read while it is in place.
+  // and whether it is the shell's own control (in the panel, not among the children or the footer), read while it is
+  // in place.
   const focusedRef = useRef<{ el: HTMLElement; inShell: boolean } | null>(null);
   useEffect(() => {
     if (!open) return;
     const onFocusIn = (e: FocusEvent) => {
       const el = e.target as HTMLElement | null;
       const panel = panelRef.current;
-      focusedRef.current = el && panel && panel.contains(el) ? { el, inShell: !content?.contains(el) } : null;
+      focusedRef.current = el && panel && panel.contains(el)
+        ? { el, inShell: !content?.contains(el) && !footerContent?.contains(el) }
+        : null;
     };
     document.addEventListener("focusin", onFocusIn);
     return () => {
@@ -137,38 +224,62 @@ export function SideSheet({
       // and no detached subtree stays referenced once the sheet is closed
       focusedRef.current = null;
     };
-  }, [open, content]);
-  const attachSlot = useCallback((slot: HTMLDivElement | null) => {
-    if (!slot || !content || content.parentNode === slot) return;
+  }, [open, content, footerContent]);
+  const beforeSwap = useCallback(() => {
     const last = focusedRef.current?.el ?? null;
-    movedRef.current = { last, inShell: !!focusedRef.current?.inShell, selection: last ? selectionOf(last) : null };
-    slot.appendChild(content);
+    const hadFocus = !!last && document.activeElement === last;
+    // released by the layout effect of this same commit (a commit is not interrupted between the two)
+    const release = hadFocus ? swallowFocusEvents(last, BLUR_EVENTS) : () => {};
+    movedRef.current = { last, inShell: !!focusedRef.current?.inShell, hadFocus, selection: last ? selectionOf(last) : null, release };
+  }, []);
+  const attachSlot = useCallback((slot: HTMLDivElement | null) => {
+    if (slot && content && content.parentNode !== slot) slot.appendChild(content);
   }, [content]);
+  const attachFooterSlot = useCallback((slot: HTMLDivElement | null) => {
+    if (slot && footerContent && footerContent.parentNode !== slot) slot.appendChild(footerContent);
+  }, [footerContent]);
   useLayoutEffect(() => {
     const moved = movedRef.current;
     movedRef.current = null;
-    if (!open || !moved || !content) return;
-    const { last, inShell, selection } = moved;
+    if (!moved) return;
+    moved.release();
+    const { last, inShell, hadFocus, selection } = moved;
     const panel = panelRef.current;
-    if (!last || !panel || document.activeElement === last) return;
-    if (content.contains(last)) {
-      last.focus();
+    if (!open || !content || !last || !panel || document.activeElement === last) return;
+    const kept = content.contains(last) || !!footerContent?.contains(last);
+    if (kept) {
+      const releaseFocus = hadFocus ? swallowFocusEvents(last, FOCUS_EVENTS) : () => {};
+      try { last.focus(); } finally { releaseFocus(); }
     } else if (inShell && last !== panel && !last.isConnected) {
-      shellCounterpart(last, panel, content)?.focus();
+      shellCounterpart(last, panel, [content, footerContent])?.focus();
     }
     // A control that cannot take focus now (disabled) leaves focus on <body>: the panel takes it (P263 R1-4).
-    if (!panel.contains(document.activeElement)) { panel.focus(); return; }
+    if (!panel.contains(document.activeElement)) panel.focus();
+    if (kept && hadFocus && document.activeElement !== last) {
+      // its removal blur was swallowed, and it did not get focus back: it is told it lost focus (React hears this one)
+      const relatedTarget = document.activeElement;
+      last.dispatchEvent(new FocusEvent("blur", { relatedTarget }));
+      last.dispatchEvent(new FocusEvent("focusout", { bubbles: true, relatedTarget }));
+      return;
+    }
     // The caret is put back explicitly: in Chromium focus() keeps an input's caret, so this is equivalent there (the
     // jsdom mutant survives for the same reason); WebKit and Firefox may move it on focus, so it is kept for them.
     if (selection && document.activeElement === last && (last instanceof HTMLInputElement || last instanceof HTMLTextAreaElement)) {
       try { last.setSelectionRange(selection[0], selection[1]); } catch { /* a type with no selection */ }
     }
-  }); // every commit: whatever remounted the slot, the move is handled in the commit that made it
+  }); // every commit: the swap is handled in the commit that made it
+  const detachContainers = useCallback(() => {
+    content?.remove();
+    footerContent?.remove();
+  }, [content, footerContent]);
+  // P274-5: unmounted (under StrictMode's simulated unmount the slots' refs put them back on the remount)
+  useEffect(() => detachContainers, [detachContainers]);
 
   return (
-    <AnimatePresence>
+    <AnimatePresence onExitComplete={detachContainers}>
       {open && (
         <motion.div
+          ref={overlayRef}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -176,6 +287,7 @@ export function SideSheet({
           className={isMobile ? "fixed inset-0 bg-black/50 backdrop-blur-sm z-[var(--kf-z-drawer)] flex items-end" : "fixed inset-0 bg-black/50 backdrop-blur-sm z-[var(--kf-z-drawer)]"}
           onClick={(e) => e.target === e.currentTarget && close()}
         >
+          <SheetCommitHooks layout={isMobile ? "phone" : "desktop"} onOpen={rememberOpener} onBeforeSwap={beforeSwap} />
           {/* MOUNT-QUOTES: the two branches are keyed. useIsMobile() starts false, so a sheet
               that mounts when it opens shows the desktop panel for a frame and then the bottom
               sheet; as the same element in the same slot the node was reused and kept the
@@ -228,11 +340,7 @@ export function SideSheet({
 
               <div ref={attachSlot} className="flex-1 overflow-y-auto overscroll-contain p-4" />
 
-              {footer && (
-                <div className="p-4 border-t border-border/40 shrink-0 bg-card pb-safe">
-                  {footer}
-                </div>
-              )}
+              {footer && <div ref={attachFooterSlot} className="p-4 border-t border-border/40 shrink-0 bg-card pb-safe" />}
             </motion.div>
           ) : (
             <motion.div
@@ -274,14 +382,11 @@ export function SideSheet({
 
               <div ref={attachSlot} className="flex-1 overflow-y-auto overscroll-contain p-5" />
 
-              {footer && (
-                <div className="p-4 border-t border-border/40 shrink-0 bg-card">
-                  {footer}
-                </div>
-              )}
+              {footer && <div ref={attachFooterSlot} className="p-4 border-t border-border/40 shrink-0 bg-card" />}
             </motion.div>
           )}
-          {mounted && content && createPortal(<div onClick={(e) => e.stopPropagation()}>{children}</div>, content)}
+          {mounted && content && createPortal(<div style={CONTENTS} onClick={stopClick}>{children}</div>, content)}
+          {mounted && footerContent && footer && createPortal(<div style={CONTENTS} onClick={stopClick}>{footer}</div>, footerContent)}
         </motion.div>
       )}
     </AnimatePresence>
@@ -301,25 +406,18 @@ export function QuickSheet({
   title,
   children,
 }: QuickSheetProps) {
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    },
-    [onClose],
-  );
-
-  useEffect(() => {
-    if (!open) return;
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [open, handleKeyDown]);
+  // P274-4: Escape closes this sheet only when it is the topmost open one (a QuickSheet over a SideSheet closes alone).
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  useLayoutEffect(() => { onCloseRef.current = onClose; });
+  const close = useCallback(() => onCloseRef.current(), []);
+  useTopmostEscape(open, overlayRef, close);
 
   return (
     <AnimatePresence>
       {open && (
         <motion.div
+          ref={overlayRef}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
