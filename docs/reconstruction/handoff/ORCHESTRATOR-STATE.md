@@ -32,6 +32,13 @@ pushed `pkt/V1-*` branches. No local branch, worktree, log or agent of this sess
 **Board numbering (D-297):** Claude-lane rows number from P200 up; Antigravity keeps its own sequence below 200. Claude
 waves are even-numbered, Antigravity's odd. Server follow-ups found in Claude reviews become Antigravity board rows.
 
+**Standing rule from 16:15 UTC, D-331 (owner): strictest settings everywhere, no false green.**
+- D-327 is withdrawn: every finding, NITs included, is fixed before a packet merges.
+- No wave merges with an open finding from its own reviews.
+- A test, gate or spec that can pass without proving what it claims is a defect.
+- Failures present on main are blocking launch work.
+- Where two instruction files differ, the stricter one governs.
+
 ### 0.1 Waves this session
 
 **Checkpoint 2026-11-28 15:15 UTC: M50 merged (#307, main `f8444131`). It carried P231 TRUST-BADGES-TRUE-ONLY part 1 of 2: all 25 code files, plus 23 specs and the helper.**
