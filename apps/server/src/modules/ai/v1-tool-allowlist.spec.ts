@@ -657,6 +657,7 @@ describe('KEY-TOOL-ALLOWLIST (V1-63, D-318 Option 1): single v1 allowlist & FLOW
     const dispOversight = vi.fn(async () => ({ allowed: true, tier: 1, reason: 'ok' }));
     const dispatcher = Object.assign(Object.create(ActionDispatcherService.prototype), {
       logger: quiet,
+      circuits: new Map(),
       governance: { evaluate: dispOversight },
       events: { emit: vi.fn() },
     }) as any;
@@ -706,6 +707,7 @@ describe('KEY-TOOL-ALLOWLIST (V1-63, D-318 Option 1): single v1 allowlist & FLOW
         client: {
           aiPlanStep: { update: stepUpdateB },
           aiPlan: { findFirst: vi.fn(async () => ({ userId: OWNER })) },
+          user: { findUnique: vi.fn(async () => ({ id: OWNER, role: 'USER' })) },
           membership: { findUnique: vi.fn(async () => ({ role: 'OWNER', permissionScopes: null })) },
           business: { findUnique: vi.fn(async () => ({ ownerId: OWNER })) },
         },
@@ -741,8 +743,9 @@ describe('KEY-TOOL-ALLOWLIST (V1-63, D-318 Option 1): single v1 allowlist & FLOW
       logger: quiet,
       prisma: {
         client: {
-          aiPlanStep: { update: stepUpdateC, findMany: vi.fn(async () => [{ status: 'completed' }]) },
+          aiPlanStep: { update: stepUpdateC, count: vi.fn(async () => 0) },
           aiPlan: { findFirst: vi.fn(async () => ({ userId: OWNER })), update: vi.fn(async () => ({})) },
+          user: { findUnique: vi.fn(async () => ({ id: OWNER, role: 'USER' })) },
           membership: { findUnique: vi.fn(async () => ({ role: 'OWNER', permissionScopes: null })) },
           business: { findUnique: vi.fn(async () => ({ ownerId: OWNER })) },
         },

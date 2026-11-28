@@ -487,7 +487,7 @@ describe('W11-D116-KEY-OWNER (D-116, D-119, D-125): memberToolRunAuthority — t
   it('control (D-119 set unchanged): a tool the authority map never runs is refused to every owner too; the recorded owner holding ADMIN keeps the ADMIN rights below owner-only tools (a mapped tool its scopes reach runs)', async () => {
     for (const [businessId, userId] of [[ID.bizO, ID.ownerO], [ID.bizA, ID.coOwner], [ID.bizA, ID.recAdmin]] as const) {
       const { refusal } = await memberToolRunAuthority(prismaSvc, businessId, userId, REFUSED_TOOL);
-      expect(String(refusal), userId).toMatch(/^Tool "execute_custom_logic" is not executed/);
+      expect(String(refusal), userId).toBe('not available in this version');
     }
     expect(await memberToolRunAuthority(prismaSvc, ID.bizA, ID.recAdmin, 'expenses_list')).toEqual({ refusal: null, principal: false });
   });
@@ -578,7 +578,7 @@ describe('W11-D116-KEY-OWNER review SEC-W11D116K-1 (D-125, D-116, D-71, D-119): 
     }
     expect(await memberToolRunAuthority(prismaSvc, M.bizM, M.coM, IN_MAP_TOOL)).toEqual({ refusal: null, principal: false });
     expect(await memberToolRunAuthority(prismaSvc, M.bizM, M.coM, IN_MAP_TOOL, { asPrincipal: true })).toEqual({ refusal: null, principal: true });
-    expect(String((await memberToolRunAuthority(prismaSvc, M.bizM, M.coM, REFUSED_TOOL)).refusal)).toMatch(/^Tool "execute_custom_logic" is not executed/);
+    expect(String((await memberToolRunAuthority(prismaSvc, M.bizM, M.coM, REFUSED_TOOL)).refusal)).toBe('not available in this version');
   });
 
   it('control (D-125, D-71): an OWNER membership with no explicit map (the co-owner of bizA, the recorded owner of bizO) still runs every mapped tool the scoped owners are refused (the OWNER defaults)', async () => {
@@ -1064,7 +1064,7 @@ describe('TOF-GRAPH-SCOPE-ARRAY (D-71, D-119, D-125): a JSON-array permissionSco
         principal: false,
       });
     }
-    expect(String((await memberToolRunAuthority(prismaSvc, G.bizG, G.ownerArr, REFUSED_TOOL)).refusal)).toMatch(/^Tool "execute_custom_logic" is not executed/);
+    expect(String((await memberToolRunAuthority(prismaSvc, G.bizG, G.ownerArr, REFUSED_TOOL)).refusal)).toBe('not available in this version');
   });
 });
 

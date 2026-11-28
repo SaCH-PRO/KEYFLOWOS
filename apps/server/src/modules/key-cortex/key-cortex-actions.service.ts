@@ -26,7 +26,7 @@ import {
   type MemoryReaderContext,
 } from './memory-class-read-projection';
 import { KeyCommandService } from '../ai/key-command.service';
-import { isToolAllowedInV1, v1ToolRefusalReason, v1ToolRefusalReasonForInvocation, V1_TOOL_UNAVAILABLE_MESSAGE } from '../ai/v1-tool-allowlist';
+import { isToolAllowedInV1, v1ToolRefusalReasonForInvocation, V1_TOOL_UNAVAILABLE_MESSAGE } from '../ai/v1-tool-allowlist';
 import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
 import { AutonomyOrchestratorService } from '../key-autonomy/autonomy-orchestrator.service';
 import { AutonomyLevelService } from '../key-autonomy/autonomy-level.service';

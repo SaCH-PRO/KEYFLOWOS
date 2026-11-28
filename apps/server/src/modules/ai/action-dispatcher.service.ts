@@ -8,7 +8,7 @@ import { FlowOrchestratorService } from '../ai/flow-orchestrator.service';
 import { UndoService } from './undo.service';
 import { RetryableConflictException } from '../../core/utils/retryable-conflict';
 import { isReadOnlyTool } from './flow-tool-registry';
-import { v1ToolRefusalReason } from './v1-tool-allowlist';
+import { v1ToolRefusalReasonForInvocation } from './v1-tool-allowlist';
 import { KeyIdempotencyService, fingerprintToolRequest } from '../key-cortex/key-idempotency.service';
 
 export interface DispatchContext {
@@ -331,7 +331,7 @@ export class ActionDispatcherService {
     activeClaim?: ActiveDispatchClaim,
   ): Promise<DispatchResult> {
     // V1 tool allowlist check
-    const v1Refusal = v1ToolRefusalReason(ctx.toolName);
+    const v1Refusal = v1ToolRefusalReasonForInvocation(ctx.toolName, ctx.args);
     if (v1Refusal) {
       if (activeClaim) await activeClaim.release();
       return {
