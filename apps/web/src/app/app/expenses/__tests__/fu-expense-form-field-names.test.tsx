@@ -27,6 +27,11 @@
  * R5 (WEDGE review of R4, 2 MINORs): R5-1 a press on the blocked Save takes no flight: nothing goes busy, Close and
  * Cancel are never disabled for a render, and focus stays on Save; R5-2 an Add sheet prefilled with an impossible
  * date ("2026-02-30") starts on a real day (today in the business's zone), so no impossible date is held.
+ *
+ * R6 (Chromium review of R5, MAJOR): a date-shaped prefill that is no calendar day went through new Date, which rolls
+ * it over ("2026-02-30" -> 2026-03-02, then the business's zone -> 2026-03-01): a plausible wrong date the owner never
+ * saw. Such a value now starts on today in the business's zone, exactly; pinned with a fixed clock, for the prefill
+ * and for the receipt (OCR) path.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
@@ -451,5 +456,37 @@ describe("P267 R5-2: a prefilled impossible date is not held", () => {
   it('control: a real prefill date ("2026-03-12") is kept', () => {
     open("2026-03-12");
     expect(date().value).toBe("2026-03-12");
+  });
+});
+
+describe("P267 R6-1: an impossible prefill date starts on today, never a rolled-over day", () => {
+  // 02:00 UTC on 15 June is still 14 June in the test business's zone (America/Port_of_Spain, UTC-4).
+  const NOW = new Date("2026-06-15T02:00:00Z");
+  const TODAY_IN_ZONE = "2026-06-14";
+  beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(NOW); });
+  afterEach(() => { vi.useRealTimers(); });
+  const open = (date: string, receiptUrl?: string) =>
+    render(<ExpenseFormSideSheet businessId="biz_A" categories={CATS as never} editingExpense={null} prefill={{ date, description: "Toner", amount: 99, receiptUrl }} onClose={vi.fn()} onSaved={vi.fn()} isCurrentBusiness={() => true} />);
+  const date = () => screen.getByLabelText(/^Date/) as HTMLInputElement;
+  for (const impossible of ["2026-02-30", "2026-02-31", "2026-04-31", "2026-02-29"]) {
+    it(`a prefill of "${impossible}" starts on today in the business's zone (${TODAY_IN_ZONE}), not a rolled-over day`, () => {
+      open(impossible);
+      expect(date().value, "an impossible date became a different, plausible one").toBe(TODAY_IN_ZONE);
+    });
+  }
+  it('control: a real prefill date ("2026-03-12") is kept as it is', () => {
+    open("2026-03-12");
+    expect(date().value).toBe("2026-03-12");
+  });
+  it("control: a full date-time prefill is read as an instant, in the business's zone", () => {
+    open("2026-03-12T02:30:00Z"); // 22:30 on 11 March in Port of Spain
+    expect(date().value).toBe("2026-03-11");
+  });
+  it('the receipt (OCR) path: "2026-02-30" from the receipt leaves Date on today in the business\'s zone', async () => {
+    open("2026-02-30", "https://drive.google.com/file/d/abc/view");
+    client.extractReceipt.mockResolvedValue(ok({ invoiceData: { total: 99, issueDate: "2026-02-30", lineItems: [{ description: "Toner" }] }, confidence: 0.9 }));
+    fireEvent.click(screen.getAllByRole("button").find((b) => /Extract with AI/.test(b.textContent ?? ""))!);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(date().value).toBe(TODAY_IN_ZONE);
   });
 });
