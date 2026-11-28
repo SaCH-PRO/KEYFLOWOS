@@ -220,8 +220,38 @@ function closesLowQuote(g: string[], i: number): boolean {
   return open > 0;
 }
 
+const KEPT_MARK = /^[%+"'\p{Pe}\p{Pf}]/u;
+/** r19 (R19-2): sentence punctuation that may hold a conditions marker: \p{Sentence_Terminal} and the commas. */
+const SENTENCE_PUNCT = /^(?:\p{Sentence_Terminal}|[,，、､﹐﹑])$/u;
 /**
- * P231 r12-r18: the graphemes dropped from the end of the kept part, before the "..." (one grapheme at a time, so an
+ * r19 (R19-1, R19-2): whether g[i], the grapheme before a run of conditions markers (never a marker itself), stays at
+ * the cut, so the markers on it stay too. Decided here, once, without dropTrailing (so no recursion):
+ * - content, a kept mark ("%", "+", a closing bracket or quote, a straight quote), a „-closing "“": it stays;
+ * - sentence punctuation (\p{Sentence_Terminal}, commas) whose run reaches back to content or a kept mark ("Free!*",
+ *   "Free!!*", "Free,*"); after whitespace or a lone mark ("Shop !*", "Shop &!*") it does not;
+ * - an opening bracket or quote, a dash, any other always-dropped mark: it never does ("Shop (*", "Free—*");
+ * - any other mark: when its run reaches back to content ("C#*", "5€*"), or it is an all-currency run after a number
+ *   and a space ("5 €*"); a lone one does not ("Shop •*", "Pay €*").
+ */
+function holdsMarker(g: string[], i: number): boolean {
+  const b = g[i];
+  if (b === undefined || isSpace(b)) return false;
+  if (hasContent(b) || KEPT_MARK.test(b) || closesLowQuote(g, i)) return true;
+  if (SENTENCE_PUNCT.test(b)) {
+    let m = i;
+    while (m > 0 && SENTENCE_PUNCT.test(g[m - 1])) m--;
+    return hasContent(g[m - 1]) || KEPT_MARK.test(g[m - 1] ?? "");
+  }
+  if (ALWAYS_DROPPED.test(b) || !isMark(b)) return false;
+  let k = i;
+  while (k > 0 && isMark(g[k - 1]) && !ALWAYS_DROPPED.test(g[k - 1])) k--;
+  if (hasContent(g[k - 1])) return true;
+  const currency = g.slice(k, i + 1).every((r) => /^\p{Sc}$/u.test(r));
+  return currency && isSpace(g[k - 1]) && /^\p{Nd}$/u.test(g[k - 2] ?? "");
+}
+
+/**
+ * P231 r12-r19: the graphemes dropped from the end of the kept part, before the "..." (one grapheme at a time, so an
  * emoji with a skin tone, a keycap, a flag, a family is never split):
  * - always: whitespace and ALWAYS_DROPPED;
  * - any other punctuation or symbol ("&", "•", "/", "*", "#", "@", "¿", "<", "$", "©", "↔") only when its run of
@@ -234,9 +264,10 @@ function closesLowQuote(g: string[], i: number): boolean {
  *   holding anything else (a letter, a digit, a mark), alone or not (R15-4: "50 %...", "1 +...", "( weekdays )...":
  *   a closing mark closes what the kept part opened, and dropping it would leave that open); a "“" or "‘" closing a
  *   „ or ‚ the kept part opened (R18-3: "Sale „Big“...");
- * - never, attached to what stays before it: a conditions marker ("*", "†", "‡", or a run of them), which points to
- *   terms and must not go while the claim it qualifies stays (R18-1: "50 %*", "( sale )*", "5 €*", "Free*"), after
- *   sentence punctuation too (R18-2: "Free!*", "Free.*"; other symbols there still go: "Yahoo!™" gives "Yahoo").
+ * - never, attached to what stays before it (holdsMarker): a conditions marker ("*", "†", "‡", or a run of them),
+ *   which points to terms and must not go while the claim it qualifies stays (R18-1: "50 %*", "( sale )*", "5 €*",
+ *   "Free*"), after attached sentence punctuation too (R18-2, R19-2: "Free!*", "Free.*"; other symbols there still
+ *   go: "Yahoo!™" gives "Yahoo"); after a mark that goes it goes with it (R19-2: "Shop (*", "Shop !*" give "Shop").
  */
 function dropTrailing(g: string[]): string[] {
   let end = g.length;
@@ -247,19 +278,18 @@ function dropTrailing(g: string[]): string[] {
       continue;
     }
     if (!isMark(c)) break;
-    if (/^[%+"'\p{Pe}\p{Pf}]/u.test(c)) break;
+    if (KEPT_MARK.test(c)) break;
     // r18 (R18-3): a "“" or "‘" closes a „ or ‚ the kept part opened (German, Polish), and stays as a closing mark.
     if (closesLowQuote(g, end - 1)) break;
-    // r18 (R18-1, R18-2): a conditions marker ("*", "†", "‡", or a run of them) attached to what stays before it
-    // qualifies that, and stays too: after a word, a kept mark, a kept currency run ("50 %*", "( sale )*", "5 €*"), or
-    // sentence punctuation ("Free!*", "Free.*"). After whitespace or nothing, or after a lone symbol that goes
-    // ("Shop •*"), it goes with the rest of its run, as any lone mark does.
-    // "What stays" is asked of the part before it (dropTrailing of it keeps its last grapheme): whitespace never
-    // stays there, and a marker before this one stays exactly when what it is attached to does ("Free**" keeps both,
-    // "Shop **" neither), so no separate test for either is needed.
+    // r18-r19 (R18-1, R18-2, R19-1, R19-2): a conditions marker ("*", "†", "‡", or a run of them) qualifies what it is
+    // attached to, and stays while that stays (holdsMarker: a word, a kept mark, a kept currency run, attached sentence
+    // punctuation: "50 %*", "( sale )*", "5 €*", "Free!*"). After whitespace or nothing, or after a mark that goes
+    // ("Shop •*", "Shop (*", "Shop !*"), it goes with the rest of its run, as any lone mark does. The run is skipped
+    // once and the grapheme before it decided once, in linear time (no recursion: R19-1).
     if (CONDITIONS.test(c)) {
-      const before = g[end - 2];
-      if (before !== undefined && (ALWAYS_DROPPED.test(before) || dropTrailing(g.slice(0, end - 1)).length === end - 1)) break;
+      let j = end - 1;
+      while (j > 0 && CONDITIONS.test(g[j - 1])) j--;
+      if (holdsMarker(g, j - 1)) break;
     }
     if (!ALWAYS_DROPPED.test(c)) {
       // The run this grapheme ends: the marks before it, back to content, whitespace, the start, or (r16, R16-3)
