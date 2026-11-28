@@ -161,6 +161,9 @@ describe("P257: the commerce SideSheet's other callers are unchanged", () => {
       ["a no-substitution template literal", "const m = import(`../components/side-sheet`);"],
       ["a re-export", 'export { SideSheet } from "../components/side-sheet";'],
       ["import type", 'import type { SideSheet } from "../components/side-sheet";'],
+      // P257 R4 (review B of R3): a bare side-effect import, and the module named through /index.
+      ["a bare side-effect import", 'import "../components/side-sheet";'],
+      ["side-sheet/index", 'import { SideSheet } from "../components/side-sheet/index";'],
     ];
     for (const [form, text] of cases) {
       it(`${form} is found and reaches the commerce sheet`, () => {
