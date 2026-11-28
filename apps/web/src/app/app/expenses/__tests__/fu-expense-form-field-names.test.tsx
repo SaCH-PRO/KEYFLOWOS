@@ -23,6 +23,10 @@
  * calendar date ("2026-02-30", "2026-13-01") is not taken, and does not count as a date.
  * The R2 and R3 checks that said toBeDisabled / toBeEnabled for a missing field now say blocked / not blocked
  * (aria-disabled): the button is no longer natively disabled for a missing field (R4-1).
+ *
+ * R5 (WEDGE review of R4, 2 MINORs): R5-1 a press on the blocked Save takes no flight: nothing goes busy, Close and
+ * Cancel are never disabled for a render, and focus stays on Save; R5-2 an Add sheet prefilled with an impossible
+ * date ("2026-02-30") starts on a real day (today in the business's zone), so no impossible date is held.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
@@ -402,5 +406,48 @@ describe("P267 R4-1: a blocked Save stays focusable, says why, and sends nothing
     fireEvent.click(save());
     await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
     expect(client.createExpense).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("P267 R5-1: a press on the blocked Save takes no flight", () => {
+  it("Close and Cancel are never disabled, aria-busy is never set, and focus stays on Save", async () => {
+    sheet();
+    fireEvent.change(named("textbox", "Description"), { target: { value: "Printer toner" } });
+    fireEvent.change(named("spinbutton", "Amount (TTD)"), { target: { value: "100" } });
+    fireEvent.change(screen.getByLabelText(/^Date/), { target: { value: "" } });
+    const save = screen.getByRole("button", { name: "Add Expense" });
+    const cancel = screen.getByRole("button", { name: "Cancel" });
+    const close = screen.getByRole("button", { name: "Close" });
+    const seen: string[] = [];
+    const watch = new MutationObserver((records) => {
+      for (const r of records) {
+        const el = r.target as HTMLElement;
+        if (r.attributeName === "disabled" && el.hasAttribute("disabled")) seen.push(`${el.textContent?.trim() || el.getAttribute("aria-label")} disabled`);
+        if (r.attributeName === "aria-busy" && el.getAttribute("aria-busy") === "true") seen.push("Save aria-busy");
+      }
+    });
+    for (const el of [save, cancel, close]) watch.observe(el, { attributes: true, attributeFilter: ["disabled", "aria-busy"] });
+    save.focus();
+    fireEvent.click(save);
+    await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
+    watch.disconnect();
+    expect(seen, "the blocked press took a flight for a render").toEqual([]);
+    expect(document.activeElement, "focus left the blocked Save").toBe(save);
+    expect(client.createExpense).not.toHaveBeenCalled();
+  });
+});
+
+describe("P267 R5-2: a prefilled impossible date is not held", () => {
+  const open = (date: string) =>
+    render(<ExpenseFormSideSheet businessId="biz_A" categories={CATS as never} editingExpense={null} prefill={{ date, description: "Toner", amount: 99 }} onClose={vi.fn()} onSaved={vi.fn()} isCurrentBusiness={() => true} />);
+  const date = () => screen.getByLabelText(/^Date/) as HTMLInputElement;
+  it('a prefill of "2026-02-30" starts on a real day, so Save is not blocked by an empty-looking Date', () => {
+    open("2026-02-30");
+    expect(date().value, "the impossible date is held (the input shows it as empty)").toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(isBlocked(screen.getByRole("button", { name: "Add Expense" })), "Save is blocked by a date the form invented").toBe(false);
+  });
+  it('control: a real prefill date ("2026-03-12") is kept', () => {
+    open("2026-03-12");
+    expect(date().value).toBe("2026-03-12");
   });
 });
