@@ -169,3 +169,37 @@ describe("R27-2: a Retry started on A1 lands once the page shows A2", () => {
     expect(screen.queryByText(/Couldn't load the category/)).toBeNull();
   });
 });
+
+describe("R27-2: a Retry started on A1 that throws once the page shows A2", () => {
+  it("budgets: A2's 'No budget set' stays, with no failure note", async () => {
+    client.fetchExpenseBudgets.mockResolvedValue(refusedAnswer());
+    const view = render(<ExpenseDetailPage />);
+    await screen.findByRole("heading", { name: "October Vendor" });
+    const held = deferred<unknown>();
+    client.fetchExpenseBudgets.mockReturnValueOnce(held.promise);
+    fireEvent.click(retryIn((await screen.findByText(/Couldn't load this category's budget/)).closest('[role="status"]')!));
+    client.fetchExpenseBudgets.mockResolvedValue(ok([]));
+    await toA2(view);
+    expect(await screen.findByText("No budget set for this category.")).toBeTruthy();
+    await act(async () => { held.reject(new TypeError("Failed to fetch")); });
+    await settle();
+    expect(screen.queryByText(/Couldn't load this category's budget/), "A1's Retry failure said on A2").toBeNull();
+    expect(screen.getByText("No budget set for this category.")).toBeTruthy();
+  });
+  it("categories: A2's category read stays ok (an unknown category is 'Uncategorized', not a failure)", async () => {
+    client.fetchExpenseCategories.mockResolvedValue(refusedAnswer());
+    client.fetchExpenseBudgets.mockResolvedValue(ok([]));
+    client.getExpense.mockImplementation(async (_b: string, id: string) => ok(id === "exp_A2" ? A2({ categoryId: "cat_9" }) : A1()));
+    const view = render(<ExpenseDetailPage />);
+    await screen.findByRole("heading", { name: "October Vendor" });
+    const held = deferred<unknown>();
+    client.fetchExpenseCategories.mockReturnValueOnce(held.promise);
+    fireEvent.click(retryIn((await screen.findAllByText(/Couldn't load the category:/)).map((n) => n.closest('[role="status"]')).find(Boolean)!));
+    client.fetchExpenseCategories.mockResolvedValue(ok([CAT]));
+    await toA2(view);
+    expect((await screen.findAllByText(/Uncategorized/)).length).toBeGreaterThan(0);
+    await act(async () => { held.reject(new TypeError("Failed to fetch")); });
+    await settle();
+    expect(screen.queryByText(/Couldn't load the category/), "A1's Retry failure said on A2").toBeNull();
+  });
+});
