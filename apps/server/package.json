@@ -38,7 +38,7 @@
     "@keyflow/api": "workspace:*",
     "@keyflow/db": "workspace:*",
     "@keyflow/shared": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.32.0",
     "@nestjs/axios": "^4.0.1",
     "@nestjs/common": "^11.1.19",
     "@nestjs/core": "^11.1.19",
