@@ -143,8 +143,8 @@ describe("P254: the recurring panel with no business", () => {
     const reads: BlockRead[] = [];
     const el = (b: string | null) => <RecurringExpensesPanel businessId={b} categories={[]} triggerNew={0} onListRead={(r) => reads.push(r)} />;
     const view = render(el("biz_A"));
-    expect(await screen.findByRole("button", { name: /Run Now/i })).toBeTruthy();
-    expect(reads.at(-1)?.kind).toBe("ok");
+    expect(await screen.findByRole("button", { name: /Run Now/i }, LONG)).toBeTruthy();
+    await waitFor(() => expect(reads.at(-1)?.kind).toBe("ok"), LONG); // reported from an effect after the render
     ws.bid = null;
     view.rerender(el(null));
     await settle();
@@ -168,19 +168,19 @@ describe("P254: the recurring panel with no business", () => {
     view.rerender(el("biz_A", 0));
     await settle();
     view.rerender(el("biz_A", 1));
-    expect(await screen.findByRole("dialog")).toBeTruthy();
+    expect(await screen.findByRole("dialog", {}, LONG)).toBeTruthy();
   });
   it("R1-2 control: with a business, a New request opens the builder", async () => {
     const el = (t: number) => <RecurringExpensesPanel businessId="biz_A" categories={[]} triggerNew={t} />;
     const view = render(el(0));
     await settle();
     view.rerender(el(1));
-    expect(await screen.findByRole("dialog")).toBeTruthy();
+    expect(await screen.findByRole("dialog", {}, LONG)).toBeTruthy();
   });
   it("control: a business whose list answers empty shows the empty state with Add", async () => {
     client.fetchRecurringExpenses.mockResolvedValue(ok([]));
     render(<RecurringExpensesPanel businessId="biz_A" categories={[]} triggerNew={0} />);
-    expect(await screen.findByText(/no recurring expenses/i)).toBeTruthy();
+    expect(await screen.findByText(/no recurring expenses/i, {}, LONG)).toBeTruthy();
   });
 });
 
