@@ -541,6 +541,11 @@ describe('FU-CORTEX-EXECUTE-STRUCTURED-DTO: ExecuteCommandDto requires exactly o
       ['broken suggestion-card payload', { businessId: 'biz_1', suggestionId: 's1', endpoint: '/crm/notes', payload: {} }],
       ['non-string module', { businessId: 'biz_1', module: 123, action: 'add_note' }],
       ['non-string command alongside structured', { businessId: 'biz_1', command: 123, module: 'crm', action: 'add_note' }],
+      ['whitespace-only command alongside structured', { businessId: 'biz_1', command: '   ', module: 'crm', action: 'add_note' }],
+      ['JSON null command alongside structured', { businessId: 'biz_1', command: null, module: 'crm', action: 'add_note' }],
+      ['JSON null module alongside command', { businessId: 'biz_1', command: 'list contacts', module: null }],
+      ['JSON null action alongside command', { businessId: 'biz_1', command: 'list contacts', action: null }],
+      ['omitted businessId', { command: 'list contacts' }],
       ['empty businessId', { businessId: '   ', command: 'list contacts' }],
     ];
 
@@ -554,7 +559,10 @@ describe('FU-CORTEX-EXECUTE-STRUCTURED-DTO: ExecuteCommandDto requires exactly o
 
   it('executeCommand handler enforces the same either/or rule, executes structured module+action without command for a permitted member, and refuses 403 otherwise (D-140/D-119)', async () => {
     const { BadRequestException, ForbiddenException } = await import('@nestjs/common');
-    const executor = { execute: vi.fn().mockResolvedValue({ success: true, data: { ok: true } }) };
+    const executor = {
+      execute: vi.fn().mockResolvedValue({ success: true, data: { ok: true } }),
+      logExecution: vi.fn().mockResolvedValue({ id: 'log_1' }),
+    };
     const commandSvc = { parseIntent: vi.fn(), toConnectorCommand: vi.fn() };
     const connector = { getAllCapabilities: vi.fn().mockReturnValue([]) };
     const prisma = { client: { aiExecutionLog: { create: vi.fn().mockResolvedValue({ id: 'log_1' }) } } };
@@ -591,7 +599,7 @@ describe('FU-CORTEX-EXECUTE-STRUCTURED-DTO: ExecuteCommandDto requires exactly o
     expect(executor.execute).toHaveBeenCalledTimes(1);
     expect(commandSvc.parseIntent).not.toHaveBeenCalled();
 
-    // Unpermitted member is refused 403 (D-140/D-119)
+    // Unpermitted member is refused 403 (D-140/D-119) with an audit row naming the member
     await expect(
       ctl.executeCommand(
         { businessId: 'biz_1', module: 'crm', action: 'add_note', parameters: { contactId: 'c1', note: 'hello' } },
@@ -600,6 +608,7 @@ describe('FU-CORTEX-EXECUTE-STRUCTURED-DTO: ExecuteCommandDto requires exactly o
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
     expect(executor.execute).toHaveBeenCalledTimes(1);
+    expect(executor.logExecution).toHaveBeenCalledTimes(1);
 
     // Ambiguous (both) and partial (module-only) direct handler calls are refused 400
     await expect(
