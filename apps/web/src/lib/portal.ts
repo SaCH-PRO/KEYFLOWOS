@@ -3,7 +3,13 @@ import { apiGet, apiPost, apiPatch, apiDelete } from "./api";
 export interface PortalAccess {
   id: string;
   contactId: string;
-  token: string;
+  /**
+   * The customer's portal secret. P145: GET /portal/businesses/:businessId/access leaves it out for a member below
+   * crm write, and answers hasLiveLink instead.
+   */
+  token?: string;
+  /** P145: whether the access has a live link, answered in place of the token to a member below crm write. */
+  hasLiveLink?: boolean;
   expiresAt: string;
   enabled: boolean;
   settings: Record<string, boolean>;

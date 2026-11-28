@@ -21,7 +21,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
 import type { ReactNode } from "react";
-import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-library/react";
 
 const { SLUG, BUSINESS, nothing, passthrough } = vi.hoisted(() => ({
   SLUG: "v95q-shop",
@@ -57,6 +57,8 @@ const net = vi.hoisted(() => ({
   /** What POST /site/storefront/public/:slug/checkout (the store order) answers. */
   orderAnswer: null as Record<string, unknown> | null,
   posts: [] as Array<{ path: string; body: unknown }>,
+  /** WEDGE-HIDE-STORE part 2: what the storefront read answers for storeCheckout (false: a business that does not sell). */
+  storeCheckout: false as boolean | "fails",
 }));
 /** Who fills in the checkout form, and how they pay (reset to the default customer before each case). */
 const form = vi.hoisted(() => ({ firstName: "", lastName: "", email: "", phone: "", paymentMethod: "" }));
@@ -78,6 +80,11 @@ vi.mock("@/lib/api", () => ({
   apiGet: async (path: string) => {
     if (path === `/identity/businesses/slug/${SLUG}`) return { data: BUSINESS, error: null };
     if (path.endsWith("/services") || path.endsWith("/staff") || path.endsWith("/products")) return { data: [], error: null };
+    // WEDGE-HIDE-STORE part 2 (D-263): only the mixed-cart cases (SEC-W9WCN-1) are a business whose store checkout
+    // is offered. The service-only cases (CR-V28-3) run with it NOT offered: bookings do not depend on it.
+    if (path === `/site/storefront/public/${SLUG}`) {
+      return net.storeCheckout === "fails" ? { data: null, error: "Request failed" } : { data: { storeCheckout: net.storeCheckout }, error: null };
+    }
     return { data: null, error: null };
   },
   apiPost: async ({ path, body }: { path: string; body: unknown }) => {
@@ -162,6 +169,7 @@ beforeEach(() => {
   net.posts = [];
   net.bookingAnswer = {};
   net.orderAnswer = null;
+  net.storeCheckout = false;
   Object.assign(form, DEFAULT_FORM);
   window.localStorage.clear();
   window.localStorage.setItem(`kf_cart_${SLUG}`, JSON.stringify([SERVICE]));
@@ -269,6 +277,9 @@ async function alphaChecksOutTheMixedCart(payment: Record<string, unknown>) {
 }
 
 describe("SEC-W9WCN-1: a checkout's booking token link never reaches the next customer's checkout (W9-WEB-COMMERCE-NAV review, D-07)", () => {
+  // A mixed cart sells a product: this business's store checkout is offered.
+  beforeEach(() => { net.storeCheckout = true; });
+
   it("SEC-W9WCN-1: after a mixed cart's product payment fails, Back to Shop and another customer's service checkout books that customer's own service and opens only their own token link (W9-WEB-COMMERCE-NAV)", async () => {
     await alphaChecksOutTheMixedCart({ status: "FAILED" });
     await screen.findByRole("heading", { name: "Payment Failed" }, { timeout: 3000 });
@@ -374,5 +385,78 @@ describe("SEC-W9WCN-1: a checkout's booking token link never reaches the next cu
     openSpy.mockClear();
     fireEvent.click(screen.getByRole("button", { name: "View invoice and receipt" }));
     expect(openSpy).toHaveBeenCalledWith(BRAVO_LINK, "_blank", "noopener,noreferrer");
+  });
+});
+
+/**
+ * WEDGE-HIDE-STORE part 2 (P225), repair round 4: a service-only checkout clears the lines it checked out, not the
+ * product lines the gate was hiding. Those are dropped only by a definite answer that the store is not offered.
+ */
+describe("WEDGE-HIDE-STORE part 2: a booking checkout keeps the store lines it did not check out", () => {
+  const storedIds = () => (JSON.parse(window.localStorage.getItem(`kf_cart_${SLUG}`) ?? "[]") as Array<{ id: string }>).map((c) => c.id);
+  /** A bounded window of real time (50 ms, inside act) for the page's commit, effects and timers, before a "nothing was deleted" check. */
+  const settle = () => act(() => new Promise<void>((r) => setTimeout(r, 50)));
+  /** The stored cart as written: "[]" when the page wrote an empty cart (null would mean it never wrote one). */
+  const storedRaw = () => window.localStorage.getItem(`kf_cart_${SLUG}`);
+
+  it("WHS2-32 the storefront read failed: the service is booked, the hidden product line is kept, and a retry that answers true still has it", async () => {
+    net.storeCheckout = "fails";
+    net.bookingAnswer = { success: true, bookingId: "v95q_bk_w32" };
+    window.localStorage.setItem(`kf_cart_${SLUG}`, JSON.stringify([SERVICE, PRODUCT]));
+    await bookTheService();
+    expect(orderPosts()).toHaveLength(0);
+    await waitFor(() => expect(storedIds()).toEqual([PRODUCT.id]));
+    // The booked service's line is gone; after the window the hidden product line is still stored, not deleted late.
+    await settle();
+    expect(storedIds()).toEqual([PRODUCT.id]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue Shopping" }));
+    net.storeCheckout = true;
+    fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Try again" })).toBeNull());
+    // Give the page its window before looking: a "nothing was deleted" check is worth nothing before it.
+    await settle();
+    expect(storedIds()).toEqual([PRODUCT.id]);
+    expect(orderPosts()).toHaveLength(0);
+  });
+
+  it("WHS2-33 a definite 'not offered': the service is booked and the stored product line is dropped", async () => {
+    net.storeCheckout = false;
+    net.bookingAnswer = { success: true, bookingId: "v95q_bk_w33" };
+    window.localStorage.setItem(`kf_cart_${SLUG}`, JSON.stringify([SERVICE, PRODUCT]));
+    await bookTheService();
+    await waitFor(() => expect(storedRaw()).toBe("[]"));
+    expect(orderPosts()).toHaveLength(0);
+  });
+
+  for (const [label, payment] of [
+    ["cash (no payment step)", null],
+    ["paid at once", { status: "PAID" }],
+  ] as Array<[string, Record<string, unknown> | null]>) {
+    it(`WHS2-42 offered: a placed store order, ${label}, empties the stored cart and removes the promo`, async () => {
+      net.storeCheckout = true;
+      net.bookingAnswer = { success: true, bookingId: "v95q_bk_w42" };
+      net.orderAnswer = storeOrder(payment);
+      window.localStorage.setItem(`kf_cart_${SLUG}`, JSON.stringify([SERVICE, PRODUCT]));
+      window.localStorage.setItem(`kf_promo_${SLUG}`, JSON.stringify({ code: "TEN", discountType: "percentage", discountValue: 10 }));
+      render(<PublicBookingPage />);
+      await checkOut();
+      await waitFor(() => expect(orderPosts()).toHaveLength(1));
+      await waitFor(() => {
+        expect(storedRaw()).toBe("[]");
+        expect(window.localStorage.getItem(`kf_promo_${SLUG}`)).toBeNull();
+      });
+    });
+  }
+
+  it("WHS2-44 a booking-only checkout removes the stored promo", async () => {
+    net.storeCheckout = false;
+    net.bookingAnswer = { success: true, bookingId: "v95q_bk_w44" };
+    window.localStorage.setItem(`kf_promo_${SLUG}`, JSON.stringify({ code: "TEN", discountType: "percentage", discountValue: 10 }));
+    await bookTheService();
+    await waitFor(() => {
+      expect(window.localStorage.getItem(`kf_promo_${SLUG}`)).toBeNull();
+      expect(storedRaw()).toBe("[]");
+    });
   });
 });
