@@ -11,8 +11,9 @@ Procedural memory. How the orchestrator asks the owner for a decision and record
 3. **Recommendation first, plain language.** No packet ids or file paths in the question itself unless the owner
    needs them. Say what a user of the product would see under each option.
 4. **Record at once.** When the owner answers, post the ruling on the active control room (issue #273; archived
-   predecessor: #80) as the next D-nnn in the same turn, then put it in `docs/reconstruction/BUILD-MAP-001.md` (and any
-   new packet in `V1-PLAN-RECUT.json`) in the next rulings commit. Until that commit is on main, list the ruling in
+   predecessor: #80 at GitHub's 2,500-comment cap — roll over to a new control-room issue at 2,350 comments) as the next
+   D-nnn in the same turn, then put it in `docs/reconstruction/BUILD-MAP-001.md` (and any new packet in
+   `V1-PLAN-RECUT.json`) in the next rulings commit. Until that commit is on main, list the ruling in
    `ORCHESTRATOR-STATE.md` section 2.
 5. **Never infer a ruling.** An old ruling on a similar question, or a reviewer's opinion, is not an answer. The
    one case where silence counts is the one D-222 gives: a recommended ruling the owner has not answered within 48
