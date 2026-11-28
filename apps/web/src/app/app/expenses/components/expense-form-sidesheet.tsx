@@ -343,7 +343,8 @@ export function ExpenseFormSideSheet({
   };
 
   const submit = async () => {
-    if (!formData.description.trim() || !formData.amount) return;
+    // P267 R2-1: Date is marked required, so it is required here too (an empty date was saved as today by the server).
+    if (!formData.description.trim() || !formData.amount || !formData.date) return;
     // R16-3: checked before anything is sent. Another tab's switch can reach the stored id before its storage event
     // reaches this tab (so before the page's own check knows): nothing is saved for the business no longer chosen.
     if (refusedStart(businessId, isCurrentBusiness)) return;
@@ -623,7 +624,7 @@ export function ExpenseFormSideSheet({
               </button>
               <button
                 onClick={handleSubmit}
-                disabled={submitting || !formData.description.trim() || !formData.amount}
+                disabled={submitting || !formData.description.trim() || !formData.amount || !formData.date}
                 aria-busy={submitting || undefined}
                 className="px-4 py-2.5 rounded-xl text-xs font-medium transition-colors disabled:opacity-50"
                 style={{
