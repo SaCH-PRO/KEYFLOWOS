@@ -112,7 +112,7 @@ async function postAt(
 
 async function seedBiz(businessId: string, ownerId: string, timezone: string) {
   await db.business.create({
-    data: { id: businessId, name: `${P}${businessId}`, slug: `${businessId}-slug`, ownerId, currency: 'TTD', timezone },
+    data: { id: businessId, name: `${P}${businessId}`, slug: `${P}${businessId}-slug`, ownerId, currency: 'TTD', timezone },
   });
   await db.membership.create({
     data: { id: `${P}m_${businessId}_${ownerId}`, businessId, userId: ownerId, role: 'OWNER' },
