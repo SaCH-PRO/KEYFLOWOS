@@ -36,7 +36,7 @@
  */
 
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, unlinkSync, renameSync, realpathSync } from 'node:fs';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 
@@ -542,21 +542,31 @@ function modeBash(input) {
 /* mode: edit — claim files, warn when another session holds one       */
 /* ------------------------------------------------------------------ */
 
+/** Resolve the deepest existing ancestor via realpathSync and rejoin non-existent trailing segments. */
+function realpathWithMissingTail(target) {
+  let cur = target;
+  const tail = [];
+  for (;;) {
+    try {
+      const real = realpathSync(cur);
+      return tail.length ? join(real, ...tail.reverse()) : real;
+    } catch {
+      const parent = dirname(cur);
+      if (parent === cur) return target;
+      tail.push(basename(cur));
+      cur = parent;
+    }
+  }
+}
+
 /** Repo-relative case-preserving path (forward slashes), or null if outside REPO. */
 function repoRelPath(p) {
   if (!p) return null;
   try {
     const abs = resolve(process.cwd(), p);
     let repoReal = REPO;
-    let absReal = abs;
     try { repoReal = realpathSync(REPO); } catch { /* keep resolved */ }
-    try { absReal = realpathSync(abs); } catch {
-      try {
-        const parent = resolve(abs, '..');
-        const name = abs.slice(parent.length).replace(/^[/\\]+/, '');
-        absReal = join(realpathSync(parent), name);
-      } catch { /* keep resolved */ }
-    }
+    const absReal = realpathWithMissingTail(abs);
     const rel = relative(repoReal, absReal);
     if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return null;
     return rel.split(sep).join('/');
